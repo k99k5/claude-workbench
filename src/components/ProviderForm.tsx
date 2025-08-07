@@ -31,8 +31,8 @@ export default function ProviderForm({
     auth_token: initialData?.auth_token || '',
     api_key: initialData?.api_key || '',
     model: initialData?.model || '',
-    // api_key_helper 保留在接口中但不在 UI 中显示，通过其他方式设置
-    api_key_helper: initialData?.api_key_helper || undefined,
+    // api_key_helper 将由后端根据 auth_token 自动生成
+    api_key_helper: undefined,
   });
   
   const [loading, setLoading] = useState(false);
@@ -77,12 +77,15 @@ export default function ProviderForm({
       setLoading(true);
       
       const submitData: Omit<ProviderConfig, 'id'> = {
-        ...formData,
+        name: formData.name.trim(),
+        description: formData.description.trim(),
+        base_url: formData.base_url.trim(),
         // 清理空值
         auth_token: formData.auth_token?.trim() || undefined,
         api_key: formData.api_key?.trim() || undefined,
-        api_key_helper: formData.api_key_helper?.trim() || undefined,
         model: formData.model?.trim() || undefined,
+        // api_key_helper 由后端自动生成，不从前端传递
+        api_key_helper: undefined,
       };
 
       await onSubmit(submitData);
@@ -228,6 +231,13 @@ export default function ProviderForm({
                   />
                   <p className="text-xs text-muted-foreground">
                     部分代理商需要指定特定的模型名称
+                  </p>
+                </div>
+                
+                {/* API Key Helper 说明 - 不再需要手动输入 */}
+                <div className="p-3 bg-muted/50 rounded-lg">
+                  <p className="text-xs text-muted-foreground">
+                    💡 <strong>API Key Helper 自动生成：</strong>系统将根据认证Token自动生成 apiKeyHelper 命令（格式：echo 'your-token'），无需手动配置。
                   </p>
                 </div>
               </div>

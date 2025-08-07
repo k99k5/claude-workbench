@@ -288,6 +288,15 @@ export default function ProviderManager({ onBack }: ProviderManagerProps) {
                     {config.model && (
                       <p><span className="font-medium">模型：</span>{config.model}</p>
                     )}
+                    {config.api_key_helper && (
+                      <p><span className="font-medium">Key Helper：</span>
+                        <code className="text-xs bg-muted px-1 py-0.5 rounded ml-1">
+                          {config.api_key_helper.length > 50 ? 
+                            config.api_key_helper.substring(0, 47) + '...' : 
+                            config.api_key_helper}
+                        </code>
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -407,6 +416,18 @@ export default function ProviderManager({ onBack }: ProviderManagerProps) {
                     <p className="font-medium text-sm">ANTHROPIC_MODEL</p>
                     <p className="text-sm text-muted-foreground font-mono bg-muted p-2 rounded">
                       {currentConfig.anthropic_model}
+                    </p>
+                  </div>
+                )}
+                
+                {currentConfig.anthropic_api_key_helper && (
+                  <div>
+                    <p className="font-medium text-sm">apiKeyHelper</p>
+                    <p className="text-sm text-muted-foreground font-mono bg-muted p-2 rounded">
+                      {currentConfig.anthropic_api_key_helper}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      这是一个命令，用于动态生成认证令牌
                     </p>
                   </div>
                 )}

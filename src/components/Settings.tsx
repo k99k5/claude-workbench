@@ -884,15 +884,15 @@ export const Settings: React.FC<SettingsProps> = ({
                   
                   {/* API Key Helper */}
                   <div className="space-y-2">
-                    <Label htmlFor="apiKeyHelper">API Key Helper Script</Label>
+                    <Label htmlFor="apiKeyHelper">API Key Helper Command</Label>
                     <Input
                       id="apiKeyHelper"
-                      placeholder="/path/to/generate_api_key.sh"
+                      placeholder="echo 'sk-your-token-here' 或 /path/to/generate_api_key.sh"
                       value={settings?.apiKeyHelper || ""}
                       onChange={(e) => updateSetting("apiKeyHelper", e.target.value || undefined)}
                     />
                     <p className="text-xs text-muted-foreground">
-                      Custom script to generate auth values for API requests
+                      一个返回认证令牌的命令。可以是 shell 脚本路径或 echo 命令。如果输入以 sk- 或 tok_ 开头的直接令牌值，会自动包装成 echo 命令。
                     </p>
                   </div>
                   

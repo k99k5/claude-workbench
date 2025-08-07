@@ -252,11 +252,17 @@ pub async fn switch_provider_config(_app: AppHandle, config: ProviderConfig) -> 
     // 设置新的环境变量
     env_obj.insert("ANTHROPIC_BASE_URL".to_string(), serde_json::Value::String(config.base_url.clone()));
     
-    if let Some(auth_token) = &config.auth_token {
-        if !auth_token.is_empty() {
-            env_obj.insert("ANTHROPIC_AUTH_TOKEN".to_string(), serde_json::Value::String(auth_token.clone()));
+    // 确定要使用的认证令牌值
+    let auth_token = if let Some(token) = &config.auth_token {
+        if !token.is_empty() {
+            env_obj.insert("ANTHROPIC_AUTH_TOKEN".to_string(), serde_json::Value::String(token.clone()));
+            Some(token.clone())
+        } else {
+            None
         }
-    }
+    } else {
+        None
+    };
     
     if let Some(api_key) = &config.api_key {
         if !api_key.is_empty() {
@@ -270,14 +276,15 @@ pub async fn switch_provider_config(_app: AppHandle, config: ProviderConfig) -> 
         }
     }
     
-    // apiKeyHelper 是与 env 同级的独立字段
-    if let Some(api_key_helper) = &config.api_key_helper {
-        if !api_key_helper.is_empty() {
-            settings_obj.insert("apiKeyHelper".to_string(), serde_json::Value::String(api_key_helper.clone()));
-        }
+    // apiKeyHelper 自动生成 - 使用 ANTHROPIC_AUTH_TOKEN 的值
+    if let Some(token) = auth_token {
+        let helper_command = format!("echo '{}'", token);
+        settings_obj.insert("apiKeyHelper".to_string(), serde_json::Value::String(helper_command));
+        log::info!("自动生成 apiKeyHelper 命令: echo '[TOKEN_MASKED]'");
     } else {
-        // 如果没有 api_key_helper，移除这个字段
+        // 如果没有认证令牌，移除 apiKeyHelper 字段
         settings_obj.remove("apiKeyHelper");
+        log::info!("未找到认证令牌，移除 apiKeyHelper 字段");
     }
     
     // 保存设置
