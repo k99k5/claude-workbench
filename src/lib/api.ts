@@ -365,6 +365,7 @@ export interface ProviderConfig {
   base_url: string;
   auth_token?: string;
   api_key?: string;
+  api_key_helper?: string;
   model?: string;
 }
 
@@ -375,6 +376,7 @@ export interface CurrentProviderConfig {
   anthropic_base_url?: string;
   anthropic_auth_token?: string;
   anthropic_api_key?: string;
+  anthropic_api_key_helper?: string;
   anthropic_model?: string;
 }
 

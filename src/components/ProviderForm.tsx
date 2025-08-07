@@ -31,6 +31,8 @@ export default function ProviderForm({
     auth_token: initialData?.auth_token || '',
     api_key: initialData?.api_key || '',
     model: initialData?.model || '',
+    // api_key_helper 保留在接口中但不在 UI 中显示，通过其他方式设置
+    api_key_helper: initialData?.api_key_helper || undefined,
   });
   
   const [loading, setLoading] = useState(false);
@@ -79,6 +81,7 @@ export default function ProviderForm({
         // 清理空值
         auth_token: formData.auth_token?.trim() || undefined,
         api_key: formData.api_key?.trim() || undefined,
+        api_key_helper: formData.api_key_helper?.trim() || undefined,
         model: formData.model?.trim() || undefined,
       };
 

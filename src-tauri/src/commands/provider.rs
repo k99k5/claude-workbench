@@ -12,6 +12,7 @@ pub struct ProviderConfig {
     pub base_url: String,
     pub auth_token: Option<String>,
     pub api_key: Option<String>,
+    pub api_key_helper: Option<String>,
     pub model: Option<String>,
 }
 
@@ -20,6 +21,7 @@ pub struct CurrentConfig {
     pub anthropic_base_url: Option<String>,
     pub anthropic_auth_token: Option<String>,
     pub anthropic_api_key: Option<String>,
+    pub anthropic_api_key_helper: Option<String>,
     pub anthropic_model: Option<String>,
 }
 
@@ -189,7 +191,7 @@ pub fn get_provider_config(id: String) -> Result<ProviderConfig, String> {
         .ok_or_else(|| format!("未找到ID为 '{}' 的配置", id))
 }
 
-// 获取当前代理商配置（从settings.json的env字段读取）
+// 获取当前代理商配置（从settings.json的env字段和apiKeyHelper字段读取）
 #[command]
 pub fn get_current_provider_config() -> Result<CurrentConfig, String> {
     let settings = load_settings()?;
@@ -198,6 +200,11 @@ pub fn get_current_provider_config() -> Result<CurrentConfig, String> {
     let env_vars = settings.get("env")
         .and_then(|v| v.as_object())
         .unwrap_or(&empty_map);
+    
+    // apiKeyHelper 是与 env 同级的独立字段
+    let api_key_helper = settings.get("apiKeyHelper")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     
     Ok(CurrentConfig {
         anthropic_base_url: env_vars.get("ANTHROPIC_BASE_URL")
@@ -209,6 +216,7 @@ pub fn get_current_provider_config() -> Result<CurrentConfig, String> {
         anthropic_api_key: env_vars.get("ANTHROPIC_API_KEY")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
+        anthropic_api_key_helper: api_key_helper,
         anthropic_model: env_vars.get("ANTHROPIC_MODEL")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
@@ -262,6 +270,16 @@ pub async fn switch_provider_config(_app: AppHandle, config: ProviderConfig) -> 
         }
     }
     
+    // apiKeyHelper 是与 env 同级的独立字段
+    if let Some(api_key_helper) = &config.api_key_helper {
+        if !api_key_helper.is_empty() {
+            settings_obj.insert("apiKeyHelper".to_string(), serde_json::Value::String(api_key_helper.clone()));
+        }
+    } else {
+        // 如果没有 api_key_helper，移除这个字段
+        settings_obj.remove("apiKeyHelper");
+    }
+    
     // 保存设置
     save_settings(&settings)?;
     
@@ -274,7 +292,7 @@ pub async fn switch_provider_config(_app: AppHandle, config: ProviderConfig) -> 
     ))
 }
 
-// 清理代理商配置（清理settings.json的env字段中的ANTHROPIC变量）
+// 清理代理商配置（清理settings.json的env字段中的ANTHROPIC变量和apiKeyHelper字段）
 #[command]
 pub async fn clear_provider_config(_app: AppHandle) -> Result<String, String> {
     log::info!("开始清理代理商配置");
@@ -291,12 +309,18 @@ pub async fn clear_provider_config(_app: AppHandle) -> Result<String, String> {
         log::info!("已清理ANTHROPIC环境变量");
     }
     
+    // 清理与 env 同级的 apiKeyHelper 字段
+    if let Some(settings_obj) = settings.as_object_mut() {
+        settings_obj.remove("apiKeyHelper");
+        log::info!("已清理apiKeyHelper字段");
+    }
+    
     // 保存设置
     save_settings(&settings)?;
     
     log::info!("代理商配置清理完成");
     
-    Ok("✅ 已清理所有ANTHROPIC环境变量\n\n配置已从 ~/.claude/settings.json 中移除！".to_string())
+    Ok("✅ 已清理所有ANTHROPIC环境变量和apiKeyHelper配置\n\n配置已从 ~/.claude/settings.json 中移除！".to_string())
 }
 
 // 测试代理商连接
