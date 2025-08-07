@@ -7,6 +7,165 @@ use crate::router::{
 use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 use tauri::State;
+use serde::{Serialize, Deserialize};
+use serde_json::Value;
+
+/// CCR配置信息结构
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CCRConfigInfo {
+    pub providers: Vec<CCRProvider>,
+    pub router_rules: CCRRouterRules,
+    pub host: String,
+    pub port: u16,
+    pub api_timeout_ms: u64,
+    pub log_enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CCRProvider {
+    pub name: String,
+    pub api_base_url: String,
+    pub models: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CCRRouterRules {
+    pub default: String,
+    pub background: String,
+    pub think: String,
+    pub long_context: String,
+    pub web_search: String,
+    pub long_context_threshold: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CCRModel {
+    pub provider: String,
+    pub model: String,
+    pub full_name: String,
+}
+
+/// 获取CCR配置信息
+#[tauri::command]
+pub async fn router_get_ccr_config() -> Result<CCRConfigInfo, String> {
+    // 从ccr API获取配置
+    let client = reqwest::Client::new();
+    let response = client
+        .get("http://127.0.0.1:3456/api/config")
+        .send()
+        .await
+        .map_err(|e| format!("获取ccr配置失败: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err("ccr服务未运行或无法访问".to_string());
+    }
+
+    let config_json: Value = response
+        .json()
+        .await
+        .map_err(|e| format!("解析配置JSON失败: {}", e))?;
+
+    // 解析Providers
+    let providers: Vec<CCRProvider> = config_json["Providers"]
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .map(|p| CCRProvider {
+            name: p["name"].as_str().unwrap_or("").to_string(),
+            api_base_url: p["api_base_url"].as_str().unwrap_or("").to_string(),
+            models: p["models"]
+                .as_array()
+                .unwrap_or(&vec![])
+                .iter()
+                .map(|m| m.as_str().unwrap_or("").to_string())
+                .collect(),
+        })
+        .collect();
+
+    // 解析Router规则
+    let router_config = &config_json["Router"];
+    let router_rules = CCRRouterRules {
+        default: router_config["default"].as_str().unwrap_or("").to_string(),
+        background: router_config["background"].as_str().unwrap_or("").to_string(),
+        think: router_config["think"].as_str().unwrap_or("").to_string(),
+        long_context: router_config["longContext"].as_str().unwrap_or("").to_string(),
+        web_search: router_config["webSearch"].as_str().unwrap_or("").to_string(),
+        long_context_threshold: router_config["longContextThreshold"].as_u64().unwrap_or(60000),
+    };
+
+    Ok(CCRConfigInfo {
+        providers,
+        router_rules,
+        host: config_json["HOST"].as_str().unwrap_or("127.0.0.1").to_string(),
+        port: config_json["PORT"].as_u64().unwrap_or(3456) as u16,
+        api_timeout_ms: config_json["API_TIMEOUT_MS"]
+            .as_str()
+            .unwrap_or("600000")
+            .parse()
+            .unwrap_or(600000),
+        log_enabled: config_json["LOG"].as_bool().unwrap_or(false),
+    })
+}
+
+/// 获取所有可用的模型列表
+#[tauri::command]
+pub async fn router_get_ccr_models() -> Result<Vec<CCRModel>, String> {
+    let config = router_get_ccr_config().await?;
+    
+    let mut models = Vec::new();
+    for provider in config.providers {
+        for model_name in provider.models {
+            models.push(CCRModel {
+                provider: provider.name.clone(),
+                model: model_name.clone(),
+                full_name: format!("{},{}", provider.name, model_name),
+            });
+        }
+    }
+    
+    Ok(models)
+}
+
+/// 检查CCR服务是否健康
+#[tauri::command]
+pub async fn router_ccr_health_check() -> Result<bool, String> {
+    let client = reqwest::Client::new();
+    match client
+        .get("http://127.0.0.1:3456/health")
+        .send()
+        .await
+    {
+        Ok(response) => {
+            if response.status().is_success() {
+                match response.json::<Value>().await {
+                    Ok(json) => {
+                        let status = json["status"].as_str().unwrap_or("");
+                        Ok(status == "ok")
+                    }
+                    Err(_) => Ok(false)
+                }
+            } else {
+                Ok(false)
+            }
+        }
+        Err(_) => Ok(false)
+    }
+}
+
+/// 发送模型切换命令到Claude CLI
+#[tauri::command]
+pub async fn router_send_model_command(
+    provider_name: String,
+    model_name: String,
+    session_id: Option<String>,
+) -> Result<String, String> {
+    let model_command = format!("/model {},{}", provider_name, model_name);
+    
+    log::info!("发送模型切换命令: {}", model_command);
+    
+    // 发送事件到前端，由前端的Claude session处理
+    Ok(format!("模型切换命令: {}", model_command))
+}
 
 /// Router管理器状态
 pub struct RouterManagerState {

@@ -25,11 +25,12 @@ import {
   BarChart3,
   Settings2,
   Cpu,
-  Network,
 } from 'lucide-react';
 
 import { useRouter } from '@/hooks/useRouter';
 import { RoutingMode, RouterUtils } from '@/lib/router-types';
+import ModelSwitcher from '@/components/ModelSwitcher';
+import CCRWebView from '@/components/CCRWebView';
 
 /**
  * Router仪表盘主组件
@@ -172,7 +173,7 @@ export function RouterDashboard() {
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center space-x-2">
-              <Network className="w-4 h-4 text-green-500" />
+              <Cpu className="w-4 h-4 text-green-500" />
               <div>
                 <p className="text-sm font-medium">路由模式</p>
                 <p className="text-xs text-muted-foreground">
@@ -220,9 +221,10 @@ export function RouterDashboard() {
       )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="control">控制面板</TabsTrigger>
-          <TabsTrigger value="models">模型管理</TabsTrigger>
+          <TabsTrigger value="models">模型切换</TabsTrigger>
+          <TabsTrigger value="webui">Web管理</TabsTrigger>
           <TabsTrigger value="stats">统计监控</TabsTrigger>
           <TabsTrigger value="config">配置管理</TabsTrigger>
         </TabsList>
@@ -581,6 +583,24 @@ export function RouterDashboard() {
               </Card>
             )}
           </div>
+        </TabsContent>
+
+        {/* 模型切换 - 使用新的CCR集成 */}
+        <TabsContent value="models">
+          <div className="space-y-6">
+            <ModelSwitcher 
+              sessionId={undefined} // 可以传入当前会话ID
+              onModelSwitched={(provider, model) => {
+                console.log(`模型已切换: ${provider}/${model}`);
+                // 这里可以触发其他UI更新
+              }}
+            />
+          </div>
+        </TabsContent>
+
+        {/* Web管理界面 */}
+        <TabsContent value="webui">
+          <CCRWebView className="h-[600px]" />
         </TabsContent>
 
         {/* 配置管理 */}

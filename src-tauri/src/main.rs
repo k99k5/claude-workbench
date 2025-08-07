@@ -62,6 +62,8 @@ use commands::router::{
     router_switch_model, router_get_active_model, router_get_stats, router_reset_stats,
     router_test_connection, router_route_claude_request, router_validate_config,
     router_sync_from_workbench, router_get_default_config, router_health_check,
+    // 新的CCR集成命令
+    router_get_ccr_config, router_get_ccr_models, router_ccr_health_check, router_send_model_command,
     RouterManagerState,
 };
 use process::ProcessRegistryState;
@@ -277,6 +279,12 @@ fn main() {
             router_validate_config,
             router_sync_from_workbench,
             router_health_check,
+            
+            // CCR 集成命令
+            router_get_ccr_config,
+            router_get_ccr_models,
+            router_ccr_health_check,
+            router_send_model_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
