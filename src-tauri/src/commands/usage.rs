@@ -141,6 +141,7 @@ const HAIKU_35_CACHE_READ_PRICE: f64 = 0.08;
 const SESSION_WINDOW_HOURS: i64 = 5;
 
 // Helper function to check if a session is still active based on Claude Code's 5-hour window
+#[allow(dead_code)]
 fn is_session_active(session_start: &str, current_time: &DateTime<Local>) -> bool {
     if let Ok(start_time) = DateTime::parse_from_rfc3339(session_start) {
         let elapsed = current_time.signed_duration_since(start_time);
