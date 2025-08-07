@@ -244,14 +244,19 @@ export const Settings: React.FC<SettingsProps> = ({
           allow: allowRules.map(rule => rule.value).filter(v => v.trim()),
           deny: denyRules.map(rule => rule.value).filter(v => v.trim()),
         },
-        env: envVars
-          .filter(envVar => envVar.enabled) // 只保存启用的环境变量
-          .reduce((acc, { key, value }) => {
-            if (key.trim() && value.trim()) {
-              acc[key] = value;
-            }
-            return acc;
-          }, {} as Record<string, string>),
+        env: {
+          // 保留现有的所有环境变量（包括代理商配置的ANTHROPIC_*变量）
+          ...settings?.env,
+          // 然后添加/覆盖UI中配置的环境变量
+          ...envVars
+            .filter(envVar => envVar.enabled) // 只保存启用的环境变量
+            .reduce((acc, { key, value }) => {
+              if (key.trim() && value.trim()) {
+                acc[key] = value;
+              }
+              return acc;
+            }, {} as Record<string, string>),
+        },
       };
 
       await api.saveClaudeSettings(updatedSettings);
