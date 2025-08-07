@@ -90,27 +90,44 @@ The application uses a sophisticated event listener pattern that must be underst
 ```
 ~/.claude/
 ├── projects/[project-id]/[session-id].jsonl  # Session message history
-├── providers.json                            # API provider configurations (CORE)
-├── settings.json                             # User preferences
+├── settings.json                             # User preferences and provider configuration (STANDARD)
+├── providers.json                            # Legacy provider presets (for backward compatibility)
 ├── window_state.json                         # Window size/position memory
 └── hidden_projects.json                      # Deleted projects list for recovery system
 ```
 
+**IMPORTANT**: Provider configuration now follows Claude CLI standard - stored in `settings.json` env field, not separate `providers.json`.
+
 ## Critical Implementation Details
 
 ### Provider Management System (Core Feature)
-The provider management system is the primary differentiating feature of this Windows fork:
+The provider management system follows Claude CLI standard configuration:
+
+**Configuration Storage** (UPDATED - Claude CLI Standard):
+- **Current Config**: Stored in `~/.claude/settings.json` under `env` field
+- **Format**: Standard Claude CLI environment variables:
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://api.example.com",
+    "ANTHROPIC_AUTH_TOKEN": "your-token",
+    "ANTHROPIC_API_KEY": "your-key", 
+    "ANTHROPIC_MODEL": "claude-3-opus-20240229"
+  }
+}
+```
+- **Presets**: Legacy `providers.json` maintained for UI convenience
 
 **Backend Implementation** (`src-tauri/src/commands/provider.rs`):
-- `get_provider_presets()` - Lists all configured API providers
-- `add_provider_config()`, `update_provider_config()` - CRUD operations
-- Stores configurations in `~/.claude/providers.json` for security
-- Automatic Claude process restart when provider is switched
+- `get_current_provider_config()` - Reads from `settings.json` env field
+- `switch_provider_config()` - Updates `settings.json` directly (Claude CLI standard)
+- `get_provider_presets()` - Lists presets from legacy `providers.json`
+- Configuration changes take effect immediately without restart
 
 **Frontend Implementation** (`src/components/ProviderManager.tsx`):
-- Complete CRUD interface for provider management
+- Complete CRUD interface for provider presets
+- Real-time display of active configuration from `settings.json`
 - Silent switching without interrupting user workflow
-- Real-time status display of active provider
 
 ### Project Recovery System (NEW)
 Comprehensive deleted projects management with intelligent format handling:
@@ -122,7 +139,7 @@ Comprehensive deleted projects management with intelligent format handling:
 - Handles both legacy (double-dash) and standard (single-dash) project encoding formats
 
 **Frontend Implementation** (`src/components/DeletedProjects.tsx`):
-- Complete recovery interface accessible via Settings → "已删除" tab
+- Complete recovery interface accessible via CC项目列表 → "已删除项目" tab (MOVED from Settings)
 - Format indicators showing legacy vs standard project formats
 - Batch operations for restoration and permanent deletion
 - Intelligent path decoding for both encoding schemes
@@ -184,16 +201,22 @@ cargo clean
 3. Confirm switch to session-specific listeners
 4. Check `~/.claude/projects/` directory structure
 
-### Provider Configuration Issues  
-**Symptom**: Provider switching doesn't take effect
-**Debug**:
-```bash
-# Check configuration
-cat ~/.claude/providers.json
+### Provider Configuration Issues ✅ (RESOLVED)  
+**Previous Problem**: Provider configuration not following Claude CLI standard
+**Solution**: Now stores provider configuration in `~/.claude/settings.json` env field according to Claude CLI standard
 
-# Verify environment variables in process
-# Check Claude process restart in Task Manager
+**Current Debug Steps**:
+```bash
+# Check current configuration (Claude CLI standard)
+cat ~/.claude/settings.json | grep -A 10 '"env"'
+
+# Verify ANTHROPIC environment variables are set
+echo $ANTHROPIC_BASE_URL $ANTHROPIC_AUTH_TOKEN
 ```
+
+### Settings Save Bug ✅ (RESOLVED)
+**Previous Problem**: Saving settings would overwrite provider configuration in `settings.json`
+**Solution**: Settings save now preserves existing env variables (including ANTHROPIC_*) while adding UI-configured variables
 
 ### Duplicate Projects Issue ✅ (RESOLVED)
 **Previous Problem**: claude-workbench created duplicate projects due to encoding mismatch
@@ -241,3 +264,49 @@ This fork includes Windows-specific optimizations:
 **Configuration Files**:
 - **Tauri** (`tauri.conf.json`): CSP with asset protocol, Windows bundle targets
 - **TypeScript** (`tsconfig.json`): ES2020 strict mode, path mapping `@/*` → `./src/*`
+
+## Recent Critical Updates (2024-2025)
+
+### December 2024 - Provider Configuration Standardization
+- **BREAKING CHANGE**: Provider configuration now follows Claude CLI standard
+- **Migration**: Configuration moved from `providers.json` to `settings.json` env field
+- **Impact**: Fully compatible with native Claude CLI configuration
+- **Benefit**: No more configuration conflicts between claude-workbench and Claude CLI
+
+### December 2024 - Project Management UI Overhaul  
+- **UI Improvement**: Moved deleted projects from Settings to main project list
+- **New Feature**: Tabbed interface with "活跃项目" and "已删除项目" tabs
+- **UX Enhancement**: Unified project management in single interface
+- **Technical**: Uses controlled Tabs component with state management
+
+### December 2024 - Settings Save Protection
+- **Critical Fix**: Settings save no longer overwrites provider configuration
+- **Implementation**: Preserves existing env variables while adding UI-configured ones
+- **Priority System**: UI-configured variables override provider settings when explicitly set
+- **Safety**: Prevents accidental loss of ANTHROPIC_* environment variables
+
+### Project Encoding Fixes
+- **Bug Resolution**: Fixed duplicate project creation due to encoding mismatch
+- **Standardization**: Now uses single-dash encoding to match Claude CLI exactly
+- **Compatibility**: Handles both legacy (double-dash) and standard formats
+- **Recovery**: Enhanced project recovery system with intelligent format detection
+
+## Key Development Insights
+
+### Provider Management Architecture
+The provider management system underwent major architectural changes:
+1. **Legacy System**: Stored presets in separate `providers.json` file
+2. **Current System**: Presets still in `providers.json` for UI convenience, but active configuration in `settings.json` 
+3. **Claude CLI Compliance**: Full compatibility with official Claude CLI configuration format
+
+### Event System Debugging
+When debugging session issues, the event listener pattern is critical:
+- ClaudeCodeSession.tsx uses inline listeners that switch from generic to session-specific
+- Always check browser console for listener setup and cleanup logs
+- Session ID detection from system.init messages is the key switching trigger
+
+### Build System Notes
+- Always use production builds for testing (`bun run tauri build`)
+- Development mode (`tauri dev`) may have different behavior than production
+- Fast builds (`--profile dev-release`) useful for iteration but not final testing
+- Windows-specific: Process file locking may require killing existing processes before rebuild
