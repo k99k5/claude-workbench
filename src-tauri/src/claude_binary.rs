@@ -156,8 +156,11 @@ fn test_claude_binary(path: &str) -> bool {
     cmd.arg("--version");
     
     // Add CREATE_NO_WINDOW flag on Windows to prevent terminal window popup
-    use std::os::windows::process::CommandExt;
-    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
     
     match cmd.output() {
         Ok(output) => {
@@ -322,8 +325,11 @@ fn try_which_command() -> Option<ClaudeInstallation> {
     cmd.arg(arg);
     
     // Add CREATE_NO_WINDOW flag on Windows to prevent terminal window popup
-    use std::os::windows::process::CommandExt;
-    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
     
     match cmd.output() {
         Ok(output) if output.status.success() => {
@@ -486,8 +492,11 @@ fn find_standard_installations() -> Vec<ClaudeInstallation> {
         command.arg("--version");
         
         // Add CREATE_NO_WINDOW flag on Windows to prevent terminal window popup
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
         
         if let Ok(output) = command.output() {
             if output.status.success() {
@@ -566,8 +575,11 @@ fn get_claude_version(path: &str) -> Result<Option<String>, String> {
     cmd.arg("--version");
     
     // Add CREATE_NO_WINDOW flag on Windows to prevent terminal window popup
-    use std::os::windows::process::CommandExt;
-    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
     
     match cmd.output() {
         Ok(output) => {

@@ -161,7 +161,7 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
                 <div className="flex items-center justify-between">
                   <div className="flex-1" />
                   {formatTimestamp(message.receivedAt) && (
-                    <span className="text-xs text-muted-foreground font-mono">
+                    <span className="text-sm text-foreground/60 font-mono">
                       {formatTimestamp(message.receivedAt)}
                     </span>
                   )}
@@ -336,7 +336,7 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
                         </div>
                         {content.input && (
                           <div className="ml-6 p-2 bg-background rounded-md border">
-                            <pre className="text-xs font-mono overflow-x-auto">
+                            <pre className="text-sm font-mono overflow-x-auto">
                               {JSON.stringify(content.input, null, 2)}
                             </pre>
                           </div>
@@ -349,7 +349,7 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
                 })}
                 
                 {msg.usage && (
-                  <div className="text-xs text-muted-foreground mt-2">
+                  <div className="text-sm text-foreground/70 mt-2">
                     Tokens: {msg.usage.input_tokens} in, {msg.usage.output_tokens} out
                   </div>
                 )}
@@ -485,7 +485,7 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
                           
                           {beforeReminder && (
                             <div className="ml-6 p-2 bg-background rounded-md border">
-                              <pre className="text-xs font-mono overflow-x-auto whitespace-pre-wrap">
+                              <pre className="text-sm font-mono overflow-x-auto whitespace-pre-wrap">
                                 {beforeReminder}
                               </pre>
                             </div>
@@ -497,7 +497,7 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
                           
                           {afterReminder && (
                             <div className="ml-6 p-2 bg-background rounded-md border">
-                              <pre className="text-xs font-mono overflow-x-auto whitespace-pre-wrap">
+                              <pre className="text-sm font-mono overflow-x-auto whitespace-pre-wrap">
                                 {afterReminder}
                               </pre>
                             </div>
@@ -657,7 +657,7 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
                           <span className="text-sm font-medium">Tool Result</span>
                         </div>
                         <div className="ml-6 p-2 bg-background rounded-md border">
-                          <pre className="text-xs font-mono overflow-x-auto whitespace-pre-wrap">
+                          <pre className="text-sm font-mono overflow-x-auto whitespace-pre-wrap">
                             {contentText}
                           </pre>
                         </div>
@@ -712,7 +712,7 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
                     Execution Failed
                   </h4>
                   {formatTimestamp(message.receivedAt) && (
-                    <span className="text-xs text-muted-foreground font-mono">
+                    <span className="text-sm text-foreground/60 font-mono">
                       {formatTimestamp(message.receivedAt)}
                     </span>
                   )}

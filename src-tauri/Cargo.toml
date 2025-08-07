@@ -50,6 +50,16 @@ walkdir = "2"
 serde_yaml = "0.9"
 
 
+# Fast build profile for development/testing
+[profile.dev-release]
+inherits = "release"
+opt-level = 2       # Good performance, much faster than "z"
+lto = "thin"        # Thin LTO - faster than full LTO
+codegen-units = 16  # Enable parallel compilation
+incremental = true  # Enable incremental compilation
+debug = true        # Keep debug info for better debugging
+
+# Production release profile (current settings)
 [profile.release]
 # Enable more aggressive optimizations for smaller binary size
 opt-level = "z"     # Optimize for size

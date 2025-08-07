@@ -344,6 +344,18 @@ export interface FileDiff {
 }
 
 /**
+ * Window state for saving/restoring window size and position
+ */
+export interface WindowState {
+  width: number;
+  height: number;
+  x?: number;
+  y?: number;
+  maximized: boolean;
+  fullscreen: boolean;
+}
+
+/**
  * Provider configuration for API switching
  */
 export interface ProviderConfig {
@@ -553,6 +565,20 @@ export const api = {
       return await invoke<string[]>('list_hidden_projects');
     } catch (error) {
       console.error("Failed to list hidden projects:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Permanently delete a project and all its files
+   * @param projectId - The project ID to permanently delete
+   * @returns Promise resolving to success message
+   */
+  async deleteProjectPermanently(projectId: string): Promise<string> {
+    try {
+      return await invoke<string>('delete_project_permanently', { projectId });
+    } catch (error) {
+      console.error("Failed to permanently delete project:", error);
       throw error;
     }
   },
@@ -2138,5 +2164,62 @@ export const api = {
       console.error("Failed to get provider config:", error);
       throw error;
     }
-  }
+  },
+
+  /**
+   * Enhances a prompt using Claude Code SDK
+   * @param prompt - The original prompt to enhance
+   * @param model - The model to use for enhancement
+   * @param context - Optional conversation context (recent messages)
+   * @returns Promise resolving to the enhanced prompt
+   */
+  async enhancePrompt(prompt: string, model: "sonnet" | "opus", context?: string[]): Promise<string> {
+    try {
+      return await invoke<string>("enhance_prompt", { prompt, model, context });
+    } catch (error) {
+      console.error("Failed to enhance prompt:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Loads the saved window state from file
+   * @returns Promise resolving to window state or default values
+   */
+  async loadWindowState(): Promise<WindowState> {
+    try {
+      return await invoke<WindowState>("load_window_state");
+    } catch (error) {
+      console.error("Failed to load window state:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Saves the current window state to file
+   * @returns Promise resolving when state is saved
+   */
+  async saveWindowState(): Promise<void> {
+    try {
+      await invoke<void>("save_window_state");
+    } catch (error) {
+      console.error("Failed to save window state:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Applies a window state to the current window
+   * @param state - The window state to apply
+   * @returns Promise resolving when state is applied
+   */
+  async applyWindowState(state: WindowState): Promise<void> {
+    try {
+      await invoke<void>("apply_window_state", { state });
+    } catch (error) {
+      console.error("Failed to apply window state:", error);
+      throw error;
+    }
+  },
+
 };

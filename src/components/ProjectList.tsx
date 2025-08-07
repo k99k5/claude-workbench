@@ -63,10 +63,20 @@ const ITEMS_PER_PAGE = 12;
 
 /**
  * Extracts the project name from the full path
+ * Handles both Windows (\) and Unix (/) path separators
  */
 const getProjectName = (path: string): string => {
-  const parts = path.split('/').filter(Boolean);
-  return parts[parts.length - 1] || path;
+  if (!path) return 'Unknown Project';
+  
+  // Normalize path separators and split
+  const normalizedPath = path.replace(/\\/g, '/');
+  const parts = normalizedPath.split('/').filter(Boolean);
+  
+  // Get the last non-empty part (directory name)
+  const projectName = parts[parts.length - 1];
+  
+  // Fallback to the original path if we can't extract a name
+  return projectName || path;
 };
 
 /**

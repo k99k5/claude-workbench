@@ -364,7 +364,7 @@ export const FilePicker: React.FC<FilePickerProps> = ({
       className={cn(
         "absolute bottom-full mb-2 left-0 z-50",
         "w-[500px] h-[400px]",
-        "bg-background border border-border rounded-lg shadow-lg",
+        "bg-background/95 backdrop-blur-sm border border-border rounded-lg shadow-lg",
         "flex flex-col overflow-hidden",
         className
       )}

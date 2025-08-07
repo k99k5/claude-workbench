@@ -29,6 +29,7 @@ import { LanguageSelector } from "./LanguageSelector";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useTheme } from "@/contexts/ThemeContext";
 import ProviderManager from "./ProviderManager";
+import { DeletedProjects } from "./DeletedProjects";
 
 interface SettingsProps {
   /**
@@ -39,6 +40,10 @@ interface SettingsProps {
    * Optional className for styling
    */
   className?: string;
+  /**
+   * Callback when projects are restored
+   */
+  onProjectsChanged?: () => void;
 }
 
 interface PermissionRule {
@@ -62,6 +67,7 @@ interface EnvironmentVariable {
 export const Settings: React.FC<SettingsProps> = ({
   onBack,
   className,
+  onProjectsChanged,
 }) => {
   const { t } = useTranslation();
   const { theme, setTheme } = useTheme();
@@ -86,6 +92,7 @@ export const Settings: React.FC<SettingsProps> = ({
   
   // Environment variables state
   const [envVars, setEnvVars] = useState<EnvironmentVariable[]>([]);
+  
   
   // Hooks state
   const [userHooksChanged, setUserHooksChanged] = useState(false);
@@ -116,7 +123,7 @@ export const Settings: React.FC<SettingsProps> = ({
    */
   const handleSetCustomPath = async () => {
     if (!customClaudePath.trim()) {
-      setCustomPathError("Please enter a valid path");
+      setCustomPathError("请输入有效的路径");
       return;
     }
 
@@ -132,12 +139,12 @@ export const Settings: React.FC<SettingsProps> = ({
       setIsCustomPathMode(false);
       
       // Show success message
-      setToast({ message: "Custom Claude CLI path set successfully", type: "success" });
+      setToast({ message: "自定义 Claude CLI 路径设置成功", type: "success" });
       
       // Trigger status refresh
       window.dispatchEvent(new CustomEvent('validate-claude-installation'));
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to set custom path";
+      const errorMessage = error instanceof Error ? error.message : "设置自定义路径失败";
       setCustomPathError(errorMessage);
     }
   };
@@ -158,12 +165,12 @@ export const Settings: React.FC<SettingsProps> = ({
       setCustomPathError(null);
       
       // Show success message
-      setToast({ message: "Reverted to auto-detection", type: "success" });
+      setToast({ message: "已恢复到自动检测", type: "success" });
       
       // Trigger status refresh
       window.dispatchEvent(new CustomEvent('validate-claude-installation'));
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to clear custom path";
+      const errorMessage = error instanceof Error ? error.message : "清除自定义路径失败";
       setToast({ message: errorMessage, type: "error" });
     }
   };
@@ -217,9 +224,10 @@ export const Settings: React.FC<SettingsProps> = ({
           }))
         );
       }
+
     } catch (err) {
       console.error("Failed to load settings:", err);
-      setError("Failed to load settings. Please ensure ~/.claude directory exists.");
+      setError("加载设置失败。请确保 ~/.claude 目录存在。");
       setSettings({});
     } finally {
       setLoading(false);
@@ -272,8 +280,8 @@ export const Settings: React.FC<SettingsProps> = ({
       setToast({ message: "Settings saved successfully!", type: "success" });
     } catch (err) {
       console.error("Failed to save settings:", err);
-      setError("Failed to save settings.");
-      setToast({ message: "Failed to save settings", type: "error" });
+      setError("保存设置失败。");
+      setToast({ message: "保存设置失败", type: "error" });
     } finally {
       setSaving(false);
     }
@@ -435,7 +443,7 @@ export const Settings: React.FC<SettingsProps> = ({
       ) : (
         <div className="flex-1 overflow-y-auto p-4">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid grid-cols-9 w-full">
+            <TabsList className="grid grid-cols-10 w-full">
               <TabsTrigger value="general">{t('settings.general')}</TabsTrigger>
               <TabsTrigger value="permissions">权限</TabsTrigger>
               <TabsTrigger value="environment">环境</TabsTrigger>
@@ -444,6 +452,7 @@ export const Settings: React.FC<SettingsProps> = ({
               <TabsTrigger value="commands">命令</TabsTrigger>
               <TabsTrigger value="provider">代理商</TabsTrigger>
               <TabsTrigger value="storage">{t('settings.storage')}</TabsTrigger>
+              <TabsTrigger value="deleted">已删除</TabsTrigger>
             </TabsList>
             
             {/* General Settings */}
@@ -455,6 +464,7 @@ export const Settings: React.FC<SettingsProps> = ({
                   <div className="space-y-4">
                     {/* Language Selector */}
                     <LanguageSelector />
+
 
                     {/* Theme Selector */}
                     <div className="flex items-center justify-between">
@@ -570,9 +580,9 @@ export const Settings: React.FC<SettingsProps> = ({
                       <div className="border-t pt-4">
                         <div className="flex items-center justify-between mb-3">
                           <div>
-                            <Label className="text-sm font-medium">Custom Claude CLI Path</Label>
+                            <Label className="text-sm font-medium">自定义 Claude CLI 路径</Label>
                             <p className="text-xs text-muted-foreground">
-                              Manually specify a custom Claude CLI executable path
+                              手动指定自定义的 Claude CLI 可执行文件路径
                             </p>
                           </div>
                           <Button
@@ -584,7 +594,7 @@ export const Settings: React.FC<SettingsProps> = ({
                               setCustomClaudePath("");
                             }}
                           >
-                            {isCustomPathMode ? "Cancel" : "Set Custom Path"}
+                            {isCustomPathMode ? "取消" : "设置自定义路径"}
                           </Button>
                         </div>
 
@@ -617,14 +627,14 @@ export const Settings: React.FC<SettingsProps> = ({
                                   onClick={handleSetCustomPath}
                                   disabled={!customClaudePath.trim()}
                                 >
-                                  Set Path
+                                  设置路径
                                 </Button>
                                 <Button
                                   variant="outline"
                                   size="sm"
                                   onClick={handleClearCustomPath}
                                 >
-                                  Revert to Auto-detection
+                                  恢复自动检测
                                 </Button>
                               </div>
                               
@@ -633,10 +643,10 @@ export const Settings: React.FC<SettingsProps> = ({
                                   <AlertCircle className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
                                   <div className="flex-1">
                                     <p className="text-xs text-muted-foreground">
-                                      <strong>Current path:</strong> {currentBinaryPath || "Not detected"}
+                                      <strong>当前路径:</strong> {currentBinaryPath || "未检测到"}
                                     </p>
                                     <p className="text-xs text-muted-foreground mt-1">
-                                      The custom path will be validated before saving. Make sure the file exists and is a valid Claude CLI executable.
+                                      自定义路径在保存前会进行验证。请确保文件存在且为有效的 Claude CLI 可执行文件。
                                     </p>
                                   </div>
                                 </div>
@@ -656,9 +666,9 @@ export const Settings: React.FC<SettingsProps> = ({
               <Card className="p-6">
                 <div className="space-y-6">
                   <div>
-                    <h3 className="text-base font-semibold mb-2">Permission Rules</h3>
+                    <h3 className="text-base font-semibold mb-2">权限规则</h3>
                     <p className="text-sm text-muted-foreground mb-4">
-                      Control which tools Claude Code can use without manual approval
+                      控制 Claude Code 可以无需手动批准使用的工具
                     </p>
                   </div>
                   
@@ -778,9 +788,9 @@ export const Settings: React.FC<SettingsProps> = ({
                 <div className="space-y-6">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h3 className="text-base font-semibold">Environment Variables</h3>
+                      <h3 className="text-base font-semibold">环境变量</h3>
                       <p className="text-sm text-muted-foreground mt-1">
-                        Environment variables applied to every Claude Code session
+                        应用于每个 Claude Code 会话的环境变量
                       </p>
                     </div>
                     <Button
@@ -790,14 +800,14 @@ export const Settings: React.FC<SettingsProps> = ({
                       className="gap-2"
                     >
                       <Plus className="h-3 w-3" />
-                      Add Variable
+                      添加变量
                     </Button>
                   </div>
                   
                   <div className="space-y-3">
                     {envVars.length === 0 ? (
                       <p className="text-xs text-muted-foreground py-2">
-                        No environment variables configured.
+                        未配置环境变量。
                       </p>
                     ) : (
                       <>
@@ -852,12 +862,12 @@ export const Settings: React.FC<SettingsProps> = ({
                   
                   <div className="pt-2 space-y-2">
                     <p className="text-xs text-muted-foreground">
-                      <strong>Common variables:</strong>
+                      <strong>常用变量:</strong>
                     </p>
                     <ul className="text-xs text-muted-foreground space-y-1 ml-4">
-                      <li>• <code className="px-1 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400">CLAUDE_CODE_ENABLE_TELEMETRY</code> - Enable/disable telemetry (0 or 1)</li>
-                      <li>• <code className="px-1 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400">ANTHROPIC_MODEL</code> - Custom model name</li>
-                      <li>• <code className="px-1 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400">DISABLE_COST_WARNINGS</code> - Disable cost warnings (1)</li>
+                      <li>• <code className="px-1 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400">CLAUDE_CODE_ENABLE_TELEMETRY</code> - 启用/禁用遥测 (0 或 1)</li>
+                      <li>• <code className="px-1 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400">ANTHROPIC_MODEL</code> - 自定义模型名称</li>
+                      <li>• <code className="px-1 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400">DISABLE_COST_WARNINGS</code> - 禁用费用警告 (1)</li>
                     </ul>
                   </div>
                 </div>
@@ -868,9 +878,9 @@ export const Settings: React.FC<SettingsProps> = ({
               <Card className="p-6">
                 <div className="space-y-6">
                   <div>
-                    <h3 className="text-base font-semibold mb-4">Advanced Settings</h3>
+                    <h3 className="text-base font-semibold mb-4">高级设置</h3>
                     <p className="text-sm text-muted-foreground mb-6">
-                      Additional configuration options for advanced users
+                      面向高级用户的额外配置选项
                     </p>
                   </div>
                   
@@ -940,9 +950,15 @@ export const Settings: React.FC<SettingsProps> = ({
               <ProviderManager onBack={() => {}} />
             </TabsContent>
             
+            
             {/* Storage Tab */}
             <TabsContent value="storage">
               <StorageTab />
+            </TabsContent>
+            
+            {/* Deleted Projects Tab */}
+            <TabsContent value="deleted">
+              <DeletedProjects onProjectRestored={onProjectsChanged} />
             </TabsContent>
           </Tabs>
         </div>

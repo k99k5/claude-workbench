@@ -2,9 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
-use tauri::{command, AppHandle, Manager};
-use crate::process::ProcessRegistryState;
+use tauri::{command, AppHandle};
+use crate::commands::claude::get_claude_dir;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ProviderConfig {
@@ -158,139 +157,38 @@ pub fn get_current_provider_config() -> Result<CurrentConfig, String> {
 }
 
 #[command]
-pub async fn switch_provider_config(app: tauri::AppHandle, config: ProviderConfig) -> Result<String, String> {
-    // 首先清理现有环境变量 (但不重启，因为我们马上要设置新的)
-    clear_env_vars_only()?;
+pub async fn switch_provider_config(_app: AppHandle, config: ProviderConfig) -> Result<String, String> {
+    log::info!("开始切换代理商配置: {} - {}", config.name, config.description);
     
-    // 设置新的环境变量
-    set_env_var("ANTHROPIC_BASE_URL", &config.base_url)?;
+    // 直接更新 settings.json 中的 env 字段
+    update_settings_env_for_provider(&config)?;
     
-    if let Some(auth_token) = &config.auth_token {
-        set_env_var("ANTHROPIC_AUTH_TOKEN", auth_token)?;
-    }
+    log::info!("代理商配置切换完成: {}", config.name);
     
-    if let Some(api_key) = &config.api_key {
-        set_env_var("ANTHROPIC_API_KEY", api_key)?;
-    }
-    
-    if let Some(model) = &config.model {
-        set_env_var("ANTHROPIC_MODEL", model)?;
-    }
-    
-    // 终止所有运行中的Claude进程以使新环境变量生效
-    terminate_claude_processes(&app).await;
-    
-    Ok(format!("已成功切换到 {} ({})，所有Claude会话已重启以应用新配置", config.name, config.description))
+    // 无需重启，配置即时生效
+    Ok(format!(
+        "✅ 已成功切换到 {} ({})\n\n配置已即时生效，无需重启应用！", 
+        config.name, 
+        config.description
+    ))
 }
 
 #[command]
-pub async fn clear_provider_config(app: tauri::AppHandle) -> Result<String, String> {
-    // 清理所有 ANTHROPIC 相关环境变量
-    let vars_to_clear = vec![
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_AUTH_TOKEN", 
-        "ANTHROPIC_BASE_URL",
-        "ANTHROPIC_MODEL"
-    ];
+pub async fn clear_provider_config(_app: AppHandle) -> Result<String, String> {
+    log::info!("开始清理代理商配置");
     
-    for var_name in &vars_to_clear {
-        // 使用 setx 删除持久化环境变量 (Windows)
-        #[cfg(target_os = "windows")]
-        {
-            use std::os::windows::process::CommandExt;
-            
-            Command::new("cmd")
-                .args(&["/C", &format!("setx {} \"\"", var_name)])
-                .creation_flags(0x08000000) // CREATE_NO_WINDOW
-                .output()
-                .map_err(|e| format!("Failed to clear {}: {}", var_name, e))?;
-                
-            // 使用 reg 命令删除注册表中的空值 - 静默执行
-            Command::new("reg")
-                .args(&["delete", "HKCU\\Environment", "/v", var_name, "/f"])
-                .creation_flags(0x08000000) // CREATE_NO_WINDOW
-                .output()
-                .ok(); // 忽略错误，因为变量可能不存在
-        }
-        
-        // 清理当前进程的环境变量
-        env::remove_var(var_name);
-    }
+    // 清理 settings.json 中的 ANTHROPIC 环境变量
+    clear_settings_env_vars()?;
     
-    // 终止所有运行中的Claude进程以使清理生效
-    terminate_claude_processes(&app).await;
+    log::info!("代理商配置清理完成");
     
-    Ok("已清理所有 ANTHROPIC 环境变量，所有Claude会话已重启".to_string())
+    // 无需重启，配置即时生效
+    Ok("✅ 已清理所有 ANTHROPIC 环境变量\n\n配置已即时生效，无需重启应用！".to_string())
 }
 
-/// 仅清理环境变量，不重启进程 (供switch_provider_config内部使用)
-fn clear_env_vars_only() -> Result<(), String> {
-    // 清理所有 ANTHROPIC 相关环境变量
-    let vars_to_clear = vec![
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_AUTH_TOKEN", 
-        "ANTHROPIC_BASE_URL",
-        "ANTHROPIC_MODEL"
-    ];
-    
-    for var_name in &vars_to_clear {
-        // 使用 setx 删除持久化环境变量 (Windows)
-        #[cfg(target_os = "windows")]
-        {
-            use std::os::windows::process::CommandExt;
-            
-            Command::new("cmd")
-                .args(&["/C", &format!("setx {} \"\"", var_name)])
-                .creation_flags(0x08000000) // CREATE_NO_WINDOW
-                .output()
-                .map_err(|e| format!("Failed to clear {}: {}", var_name, e))?;
-                
-            // 使用 reg 命令删除注册表中的空值 - 静默执行
-            Command::new("reg")
-                .args(&["delete", "HKCU\\Environment", "/v", var_name, "/f"])
-                .creation_flags(0x08000000) // CREATE_NO_WINDOW
-                .output()
-                .ok(); // 忽略错误，因为变量可能不存在
-        }
-        
-        // 清理当前进程的环境变量
-        env::remove_var(var_name);
-    }
-    
-    Ok(())
-}
+// 系统环境变量函数已移除 - 现在直接使用 settings.json 配置
 
-#[cfg(target_os = "windows")]
-fn set_env_var(name: &str, value: &str) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
-    
-    // 设置持久化环境变量 (Windows) - 静默执行
-    // 只有包含空格或特殊字符的值才需要引号
-    let formatted_value = if value.contains(' ') || value.contains('&') || value.contains('|') || value.contains('<') || value.contains('>') || value.contains('^') {
-        format!("\"{}\"", value)
-    } else {
-        value.to_string()
-    };
-    
-    Command::new("cmd")
-        .args(&["/C", &format!("setx {} {}", name, formatted_value)])
-        .creation_flags(0x08000000) // CREATE_NO_WINDOW
-        .output()
-        .map_err(|e| format!("Failed to set {}: {}", name, e))?;
-        
-    // 同时设置当前进程的环境变量
-    env::set_var(name, value);
-    
-    Ok(())
-}
-
-#[cfg(not(target_os = "windows"))]
-fn set_env_var(name: &str, value: &str) -> Result<(), String> {
-    // 对于非 Windows 系统，只设置当前进程环境变量
-    // 持久化需要修改 shell 配置文件，这里暂时不实现
-    env::set_var(name, value);
-    Ok(())
-}
+// set_env_var 函数已移除 - 现在直接使用 settings.json 配置
 
 #[command]
 pub fn test_provider_connection(base_url: String) -> Result<String, String> {
@@ -306,59 +204,142 @@ pub fn test_provider_connection(base_url: String) -> Result<String, String> {
     Ok(format!("连接测试完成：{}", test_url))
 }
 
-/// 终止所有运行中的Claude进程以使新环境变量生效
-async fn terminate_claude_processes(app: &AppHandle) {
-    log::info!("正在终止所有Claude进程以应用新的代理商配置...");
+/// 更新 settings.json 中的环境变量以切换代理商
+fn update_settings_env_for_provider(config: &ProviderConfig) -> Result<(), String> {
+    let claude_dir = get_claude_dir().map_err(|e| {
+        let error_msg = format!("Failed to get claude dir: {}", e);
+        log::error!("{}", error_msg);
+        error_msg
+    })?;
     
-    // 获取进程注册表
-    let registry = app.state::<ProcessRegistryState>();
+    let settings_path = claude_dir.join("settings.json");
+    log::info!("Updating settings.json at: {:?}", settings_path);
     
-    // 获取所有活动的Claude会话
-    match registry.0.get_running_claude_sessions() {
-        Ok(sessions) => {
-            log::info!("找到 {} 个活动的Claude会话", sessions.len());
-            
-            for session in sessions {
-                let session_id_str = match &session.process_type {
-                    crate::process::registry::ProcessType::ClaudeSession { session_id } => session_id.as_str(),
-                    _ => "unknown",
-                };
-                
-                log::info!("正在终止Claude会话: session_id={}, run_id={}, PID={}", 
-                    session_id_str,
-                    session.run_id, 
-                    session.pid
-                );
-                
-                // 尝试优雅地终止进程
-                match registry.0.kill_process(session.run_id).await {
-                    Ok(success) => {
-                        if success {
-                            log::info!("成功终止Claude会话 {}", session.run_id);
-                        } else {
-                            log::warn!("终止Claude会话 {} 返回false", session.run_id);
-                            
-                            // 尝试强制终止
-                            if let Err(e) = registry.0.kill_process_by_pid(session.run_id, session.pid as u32) {
-                                log::error!("强制终止进程失败: {}", e);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("终止Claude会话 {} 失败: {}", session.run_id, e);
-                        
-                        // 尝试强制终止
-                        if let Err(e2) = registry.0.kill_process_by_pid(session.run_id, session.pid as u32) {
-                            log::error!("强制终止进程也失败: {}", e2);
-                        }
-                    }
-                }
-            }
-        }
-        Err(e) => {
-            log::error!("获取Claude会话列表失败: {}", e);
+    // 读取现有设置
+    let mut settings = if settings_path.exists() {
+        let content = fs::read_to_string(&settings_path).map_err(|e| {
+            let error_msg = format!("Failed to read settings.json: {}", e);
+            log::error!("{}", error_msg);
+            error_msg
+        })?;
+        
+        serde_json::from_str::<serde_json::Value>(&content).map_err(|e| {
+            let error_msg = format!("Failed to parse settings.json: {}", e);
+            log::error!("{}", error_msg);
+            error_msg
+        })?
+    } else {
+        serde_json::json!({})
+    };
+    
+    // 确保 env 字段存在
+    if !settings.is_object() {
+        settings = serde_json::json!({});
+    }
+    
+    let settings_obj = settings.as_object_mut().unwrap();
+    if !settings_obj.contains_key("env") {
+        settings_obj.insert("env".to_string(), serde_json::json!({}));
+    }
+    
+    let env_obj = settings_obj.get_mut("env").unwrap().as_object_mut().unwrap();
+    
+    // 清理之前的 ANTHROPIC 环境变量
+    env_obj.remove("ANTHROPIC_API_KEY");
+    env_obj.remove("ANTHROPIC_AUTH_TOKEN");
+    env_obj.remove("ANTHROPIC_BASE_URL");
+    env_obj.remove("ANTHROPIC_MODEL");
+    
+    // 设置新的环境变量
+    env_obj.insert("ANTHROPIC_BASE_URL".to_string(), serde_json::Value::String(config.base_url.clone()));
+    
+    if let Some(auth_token) = &config.auth_token {
+        if !auth_token.is_empty() {
+            env_obj.insert("ANTHROPIC_AUTH_TOKEN".to_string(), serde_json::Value::String(auth_token.clone()));
         }
     }
     
-    log::info!("Claude进程终止操作完成");
+    if let Some(api_key) = &config.api_key {
+        if !api_key.is_empty() {
+            env_obj.insert("ANTHROPIC_API_KEY".to_string(), serde_json::Value::String(api_key.clone()));
+        }
+    }
+    
+    if let Some(model) = &config.model {
+        if !model.is_empty() {
+            env_obj.insert("ANTHROPIC_MODEL".to_string(), serde_json::Value::String(model.clone()));
+        }
+    }
+    
+    // 写回文件
+    let json_string = serde_json::to_string_pretty(&settings).map_err(|e| {
+        let error_msg = format!("Failed to serialize settings: {}", e);
+        log::error!("{}", error_msg);
+        error_msg
+    })?;
+    
+    fs::write(&settings_path, &json_string).map_err(|e| {
+        let error_msg = format!("Failed to write settings.json: {}", e);
+        log::error!("{}", error_msg);
+        error_msg
+    })?;
+    
+    log::info!("Successfully updated settings.json with provider config");
+    Ok(())
+}
+
+/// 清理 settings.json 中的 ANTHROPIC 环境变量
+fn clear_settings_env_vars() -> Result<(), String> {
+    let claude_dir = get_claude_dir().map_err(|e| {
+        let error_msg = format!("Failed to get claude dir: {}", e);
+        log::error!("{}", error_msg);
+        error_msg
+    })?;
+    
+    let settings_path = claude_dir.join("settings.json");
+    log::info!("Clearing ANTHROPIC env vars from settings.json at: {:?}", settings_path);
+    
+    if !settings_path.exists() {
+        log::info!("settings.json does not exist, nothing to clear");
+        return Ok(());
+    }
+    
+    // 读取现有设置
+    let content = fs::read_to_string(&settings_path).map_err(|e| {
+        let error_msg = format!("Failed to read settings.json: {}", e);
+        log::error!("{}", error_msg);
+        error_msg
+    })?;
+    
+    let mut settings = serde_json::from_str::<serde_json::Value>(&content).map_err(|e| {
+        let error_msg = format!("Failed to parse settings.json: {}", e);
+        log::error!("{}", error_msg);
+        error_msg
+    })?;
+    
+    // 如果有 env 字段，清理 ANTHROPIC 相关变量
+    if let Some(env_obj) = settings.get_mut("env").and_then(|v| v.as_object_mut()) {
+        env_obj.remove("ANTHROPIC_API_KEY");
+        env_obj.remove("ANTHROPIC_AUTH_TOKEN");
+        env_obj.remove("ANTHROPIC_BASE_URL");
+        env_obj.remove("ANTHROPIC_MODEL");
+        
+        log::info!("Cleared ANTHROPIC environment variables from settings.json");
+    }
+    
+    // 写回文件
+    let json_string = serde_json::to_string_pretty(&settings).map_err(|e| {
+        let error_msg = format!("Failed to serialize settings: {}", e);
+        log::error!("{}", error_msg);
+        error_msg
+    })?;
+    
+    fs::write(&settings_path, &json_string).map_err(|e| {
+        let error_msg = format!("Failed to write settings.json: {}", e);
+        log::error!("{}", error_msg);
+        error_msg
+    })?;
+    
+    log::info!("Successfully cleared ANTHROPIC env vars from settings.json");
+    Ok(())
 }

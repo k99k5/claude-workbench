@@ -28,7 +28,8 @@ use commands::claude::{
     track_checkpoint_message, track_session_messages, update_checkpoint_settings,
     get_hooks_config, update_hooks_config, validate_hook_command,
     set_custom_claude_path, get_claude_path, clear_custom_claude_path,
-    restore_project, list_hidden_projects,
+    restore_project, list_hidden_projects, delete_project_permanently, enhance_prompt,
+    save_window_state, load_window_state, apply_window_state,
     ClaudeProcessState,
 };
 use commands::mcp::{
@@ -98,6 +99,7 @@ fn main() {
             // Initialize Claude process state
             app.manage(ClaudeProcessState::default());
 
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -107,6 +109,7 @@ fn main() {
             delete_project,
             restore_project,
             list_hidden_projects,
+            delete_project_permanently,
             get_claude_settings,
             open_new_session,
             get_system_prompt,
@@ -132,6 +135,12 @@ fn main() {
             set_custom_claude_path,
             get_claude_path,
             clear_custom_claude_path,
+            enhance_prompt,
+            
+            // Window Management
+            save_window_state,
+            load_window_state,
+            apply_window_state,
             
             // Checkpoint Management
             create_checkpoint,
@@ -202,6 +211,7 @@ fn main() {
             mcp_get_server_status,
             mcp_read_project_config,
             mcp_save_project_config,
+
             
             // Storage Management
             storage_list_tables,

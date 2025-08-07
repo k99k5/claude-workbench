@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plus, Loader2, Bot, FolderCode } from "lucide-react";
-import { api, type Project, type Session, type ClaudeMdFile } from "@/lib/api";
+import { api, type Project, type Session, type ClaudeMdFile, type WindowState } from "@/lib/api";
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { OutputCacheProvider } from "@/lib/outputCache";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -90,6 +91,96 @@ function App() {
     };
   }, []);
 
+  // 窗口状态管理：恢复保存的窗口大小和监听大小变化
+  // Window state management: restore saved window size and listen for size changes
+  useEffect(() => {
+    let resizeTimeout: NodeJS.Timeout;
+    let unlistenResize: (() => void) | null = null;
+    let isInitializing = true; // 防止初始化期间的错误保存
+
+    // 安全地恢复窗口状态
+    const loadAndApplyWindowState = async () => {
+      try {
+        const windowState: WindowState = await api.loadWindowState();
+        
+        // 后端已经验证了状态有效性，这里再次确认关键参数
+        if (windowState && windowState.width > 0 && windowState.height > 0) {
+          await api.applyWindowState(windowState);
+          console.log('Window state restored:', windowState);
+        } else {
+          console.warn('Invalid window state received, showing window with defaults:', windowState);
+          // 如果没有有效的窗口状态，也需要显示窗口
+          const appWindow = getCurrentWindow();
+          await appWindow.show();
+        }
+        
+        // 添加小延迟确保窗口状态完全应用
+        await new Promise(resolve => setTimeout(resolve, 200));
+        isInitializing = false;
+        console.log('Window initialization complete');
+      } catch (error) {
+        console.warn('Failed to restore window state:', error);
+        isInitializing = false;
+      }
+    };
+
+    const handleWindowResize = () => {
+      // 如果还在初始化中，忽略resize事件
+      if (isInitializing) {
+        console.log('Ignoring resize event during initialization');
+        return;
+      }
+
+      // 使用防抖来避免频繁保存
+      // Use debouncing to avoid frequent saves
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(async () => {
+        try {
+          await api.saveWindowState();
+          console.log('Window state saved');
+        } catch (error) {
+          console.warn('Failed to save window state:', error);
+        }
+      }, 1000); // 1秒防抖
+    };
+
+    const setupWindowListeners = async () => {
+      try {
+        const appWindow = getCurrentWindow();
+        
+        // 监听窗口resize事件
+        unlistenResize = await appWindow.onResized(handleWindowResize);
+        
+        console.log('Window resize listener setup complete');
+      } catch (error) {
+        console.warn('Failed to setup window listeners:', error);
+        // 如果Tauri监听失败，回退到DOM事件
+        window.addEventListener('resize', handleWindowResize);
+      }
+    };
+
+    const initializeWindow = async () => {
+      // 先设置监听器
+      await setupWindowListeners();
+      
+      // 然后恢复窗口状态
+      await loadAndApplyWindowState();
+    };
+
+    // 应用启动时恢复窗口状态
+    // Restore window state on app startup
+    initializeWindow();
+
+    return () => {
+      clearTimeout(resizeTimeout);
+      if (unlistenResize) {
+        unlistenResize();
+      } else {
+        window.removeEventListener('resize', handleWindowResize);
+      }
+    };
+  }, []);
+
   /**
    * 从 ~/.claude/projects 目录加载所有项目
    * Loads all projects from the ~/.claude/projects directory
@@ -166,11 +257,15 @@ function App() {
   const handleViewChange = (newView: View) => {
     // Check if we're navigating away from an active Claude session
     if (view === "claude-code-session" && isClaudeStreaming && activeClaudeSessionId) {
-      const shouldLeave = window.confirm(t('common.claudeStillResponding'));
-      
-      if (!shouldLeave) {
-        return;
-      }
+      // Use setTimeout to ensure the dialog appears after any pending state updates
+      setTimeout(() => {
+        const shouldLeave = window.confirm(t('common.claudeStillResponding'));
+        
+        if (shouldLeave) {
+          setView(newView);
+        }
+      }, 0);
+      return;
     }
     
     setView(newView);
@@ -296,7 +391,7 @@ function App() {
       case "settings":
         return (
           <div className="flex-1 flex flex-col" style={{ minHeight: 0 }}>
-            <Settings onBack={() => handleViewChange("welcome")} />
+            <Settings onBack={() => handleViewChange("welcome")} onProjectsChanged={loadProjects} />
           </div>
         );
       

@@ -96,6 +96,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   // Queued prompts state
   const [queuedPrompts, setQueuedPrompts] = useState<Array<{ id: string; prompt: string; model: "sonnet" | "opus" }>>([]);
   
+  
   // New state for preview feature
   const [showPreview, setShowPreview] = useState(false);
   const [previewUrl, setPreviewUrl] = useState("");
@@ -106,6 +107,13 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   // Add collapsed state for queued prompts
   const [queuedPromptsCollapsed, setQueuedPromptsCollapsed] = useState(false);
   
+  
+  // Enhanced scroll management
+  const [userScrolled, setUserScrolled] = useState(false);
+  const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastScrollPositionRef = useRef(0);
+  
   const parentRef = useRef<HTMLDivElement>(null);
   const unlistenRefs = useRef<UnlistenFn[]>([]);
   const hasActiveSessionRef = useRef(false);
@@ -113,11 +121,13 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const queuedPromptsRef = useRef<Array<{ id: string; prompt: string; model: "sonnet" | "opus" }>>([]);
   const isMountedRef = useRef(true);
   const isListeningRef = useRef(false);
+  const handleSendPromptRef = useRef<((prompt: string, model: "sonnet" | "opus") => Promise<void>) | null>(null);
 
   // Keep ref in sync with state
   useEffect(() => {
     queuedPromptsRef.current = queuedPrompts;
   }, [queuedPrompts]);
+
 
   // Get effective session info (from prop or extracted) - use useMemo to ensure it updates
   const effectiveSession = useMemo(() => {
@@ -219,6 +229,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     });
   }, [projectPath, session, extractedSessionInfo, effectiveSession, messages.length, isLoading]);
 
+
   // Load session history if resuming
   useEffect(() => {
     if (session) {
@@ -243,21 +254,70 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     onStreamingChange?.(isLoading, claudeSessionId);
   }, [isLoading, claudeSessionId, onStreamingChange]);
 
-  // Auto-scroll to bottom when new messages arrive or when streaming updates
+  // Smart scroll detection - detect when user manually scrolls
   useEffect(() => {
-    if (displayableMessages.length > 0) {
-      // Add a small delay to ensure DOM is updated
+    const scrollElement = parentRef.current;
+    if (!scrollElement) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = scrollElement;
+      const currentScrollPosition = scrollTop;
+      const isAtBottom = scrollTop + clientHeight >= scrollHeight - 50; // 50px threshold
+      
+      // Detect if this was a user-initiated scroll
+      const scrollDifference = Math.abs(currentScrollPosition - lastScrollPositionRef.current);
+      if (scrollDifference > 5) { // Only count significant scroll movements
+        const wasUserScroll = !shouldAutoScroll || scrollDifference > 100;
+        
+        if (wasUserScroll) {
+          setUserScrolled(!isAtBottom);
+          setShouldAutoScroll(isAtBottom);
+        }
+      }
+      
+      lastScrollPositionRef.current = currentScrollPosition;
+      
+      // Reset user scroll state after inactivity
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+      scrollTimeoutRef.current = setTimeout(() => {
+        if (isAtBottom) {
+          setUserScrolled(false);
+          setShouldAutoScroll(true);
+        }
+      }, 2000);
+    };
+
+    scrollElement.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      scrollElement.removeEventListener('scroll', handleScroll);
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+    };
+  }, [shouldAutoScroll]);
+
+  // Smart auto-scroll for new messages
+  useEffect(() => {
+    if (displayableMessages.length > 0 && shouldAutoScroll && !userScrolled) {
       const timeoutId = setTimeout(() => {
-        rowVirtualizer.scrollToIndex(displayableMessages.length - 1, { align: 'end', behavior: 'smooth' });
+        if (parentRef.current) {
+          const scrollElement = parentRef.current;
+          scrollElement.scrollTo({
+            top: scrollElement.scrollHeight,
+            behavior: 'smooth'
+          });
+        }
       }, 100);
       
       return () => clearTimeout(timeoutId);
     }
-  }, [displayableMessages.length, messages, rowVirtualizer]); // Also trigger on messages content change
+  }, [displayableMessages.length, shouldAutoScroll, userScrolled]);
 
-  // Additional auto-scroll for streaming content - force scroll when actively streaming
+  // Enhanced streaming scroll - only when user hasn't manually scrolled away
   useEffect(() => {
-    if (isLoading && displayableMessages.length > 0) {
+    if (isLoading && displayableMessages.length > 0 && shouldAutoScroll && !userScrolled) {
       const scrollToBottom = () => {
         if (parentRef.current) {
           const scrollElement = parentRef.current;
@@ -268,15 +328,14 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
         }
       };
 
-      // Scroll immediately and then periodically during streaming
-      scrollToBottom();
-      const intervalId = setInterval(scrollToBottom, 500);
+      // More frequent updates during streaming for better UX
+      const intervalId = setInterval(scrollToBottom, 300);
       
       return () => clearInterval(intervalId);
     }
-  }, [isLoading, displayableMessages.length]);
+  }, [isLoading, displayableMessages.length, shouldAutoScroll, userScrolled]);
 
-  // Calculate total tokens from messages
+  // Calculate total tokens from messages and update context manager
   useEffect(() => {
     const tokens = messages.reduce((total, msg) => {
       if (msg.message?.usage) {
@@ -427,6 +486,8 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     }
   };
 
+  // Smart model selection for Default mode
+
   const handleSendPrompt = async (prompt: string, model: "sonnet" | "opus") => {
     console.log('[ClaudeCodeSession] handleSendPrompt called with:', { prompt, model, projectPath, claudeSessionId, effectiveSession });
     
@@ -434,6 +495,20 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       setError("请先选择项目目录");
       return;
     }
+
+    // Check if this is a slash command and handle it appropriately
+    const trimmedPrompt = prompt.trim();
+    const isSlashCommand = trimmedPrompt.startsWith('/');
+    
+    if (isSlashCommand) {
+      console.log('[ClaudeCodeSession] Detected slash command:', trimmedPrompt);
+      
+      // For slash commands, we need to send them as-is to Claude CLI
+      // Claude CLI should handle the slash command parsing and execution
+      // The key is to ensure the command is passed correctly to the Claude process
+    }
+
+    console.log('[ClaudeCodeSession] Using model:', model);
 
     // If already loading, queue the prompt
     if (isLoading) {
@@ -556,6 +631,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               message.receivedAt = new Date().toISOString();
             }
             
+            
             setMessages((prev) => [...prev, message]);
           } catch (err) {
             console.error('Failed to parse message:', err, payload);
@@ -671,6 +747,11 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     }
   };
 
+  // Update ref whenever function changes
+  useEffect(() => {
+    handleSendPromptRef.current = handleSendPrompt;
+  }, [handleSendPrompt]);
+
   const handleCopyAsJsonl = async () => {
     const jsonl = rawJsonlOutput.join('\n');
     await navigator.clipboard.writeText(jsonl);
@@ -754,6 +835,64 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     await loadSessionHistory();
     // Ensure timeline reloads to highlight current checkpoint
     setTimelineVersion((v) => v + 1);
+  };
+
+  // Get conversation context for prompt enhancement
+  const getConversationContext = (): string[] => {
+    const contextMessages: string[] = [];
+    const maxMessages = 5; // 获取最近5条消息作为上下文
+    
+    // Filter out system init messages and get meaningful content
+    const meaningfulMessages = messages.filter(msg => {
+      // Skip system init messages
+      if (msg.type === "system" && msg.subtype === "init") return false;
+      // Skip empty messages
+      if (!msg.message?.content?.length && !msg.result) return false;
+      return true;
+    });
+    
+    // Get the last N messages
+    const recentMessages = meaningfulMessages.slice(-maxMessages);
+    
+    for (const msg of recentMessages) {
+      let contextLine = "";
+      
+      if (msg.type === "user" && msg.message) {
+        // Extract user message text
+        const userText = msg.message.content
+          ?.filter((c: any) => c.type === "text")
+          .map((c: any) => c.text)
+          .join("\n");
+        if (userText) {
+          contextLine = `用户: ${userText}`;
+        }
+      } else if (msg.type === "assistant" && msg.message) {
+        // Extract assistant message text
+        const assistantText = msg.message.content
+          ?.filter((c: any) => c.type === "text")
+          .map((c: any) => {
+            if (typeof c.text === 'string') return c.text;
+            return c.text?.text || '';
+          })
+          .join("\n");
+        if (assistantText) {
+          // Truncate very long assistant responses
+          const truncated = assistantText.length > 500 
+            ? assistantText.substring(0, 500) + "..." 
+            : assistantText;
+          contextLine = `助手: ${truncated}`;
+        }
+      } else if (msg.type === "result" && msg.result) {
+        // Include execution results
+        contextLine = `执行结果: ${msg.result}`;
+      }
+      
+      if (contextLine) {
+        contextMessages.push(contextLine);
+      }
+    }
+    
+    return contextMessages;
   };
 
   const handleCancelExecution = async () => {
@@ -878,6 +1017,8 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     }
   };
 
+
+
   // Cleanup event listeners and track mount state
   useEffect(() => {
     isMountedRef.current = true;
@@ -908,7 +1049,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       ref={parentRef}
       className="flex-1 overflow-y-auto relative"
       style={{
-        paddingBottom: 'calc(240px + env(safe-area-inset-bottom))', // 增加底部空间防止遮挡
+        paddingBottom: 'calc(100px + env(safe-area-inset-bottom))', // 优化底部空间，让内容更贴近输入框
         paddingTop: '20px',
       }}
     >
@@ -947,25 +1088,14 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
         </AnimatePresence>
       </div>
 
-      {/* Loading indicator under the latest message */}
-      {isLoading && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="flex items-center justify-center py-4 mb-48"
-          style={{ marginBottom: 'calc(200px + env(safe-area-inset-bottom))' }}
-        >
-          <div className="rotating-symbol text-primary" />
-        </motion.div>
-      )}
 
       {/* Error indicator */}
       {error && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive mb-48 w-full max-w-5xl mx-auto"
-          style={{ marginBottom: 'calc(200px + env(safe-area-inset-bottom))' }}
+          className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive w-full max-w-5xl mx-auto"
+          style={{ marginBottom: 'calc(80px + env(safe-area-inset-bottom))' }}
         >
           {error}
         </motion.div>
@@ -1060,6 +1190,23 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           </div>
           
           <div className="flex items-center gap-2">
+            {/* Loading Indicator in Toolbar */}
+            {isLoading && (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-md text-xs text-blue-600">
+                <div className="rotating-symbol text-blue-600" style={{ width: '12px', height: '12px' }} />
+                <span>处理中...</span>
+              </div>
+            )}
+            
+            {/* Token Counter in Toolbar */}
+            {totalTokens > 0 && (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-muted/50 rounded-md border text-xs text-muted-foreground">
+                <Hash className="h-3 w-3" />
+                <span className="font-mono font-medium">{totalTokens.toLocaleString()}</span>
+                <span>tokens</span>
+              </div>
+            )}
+            
             {projectPath && onProjectSettings && (
               <Button
                 variant="outline"
@@ -1272,7 +1419,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
             )}
           </AnimatePresence>
 
-          {/* Navigation Arrows - positioned above prompt bar with spacing */}
+          {/* Enhanced scroll controls with smart indicators */}
           {displayableMessages.length > 5 && (
             <motion.div
               initial={{ opacity: 0, scale: 0.8 }}
@@ -1284,60 +1431,76 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                 bottom: 'calc(120px + env(safe-area-inset-bottom))', // 确保在输入区域上方
               }}
             >
-              <div className="flex items-center floating-element backdrop-enhanced rounded-full overflow-hidden">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    // Use virtualizer to scroll to the first item
-                    if (displayableMessages.length > 0) {
-                      // Scroll to top of the container
-                      parentRef.current?.scrollTo({
-                        top: 0,
-                        behavior: 'smooth'
-                      });
-                      
-                      // After smooth scroll completes, trigger a small scroll to ensure rendering
-                      setTimeout(() => {
+              <div className="flex flex-col gap-2">
+                {/* New message indicator - only show when user scrolled away */}
+                <AnimatePresence>
+                  {userScrolled && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 20, scale: 0.8 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 20, scale: 0.8 }}
+                      className="floating-element backdrop-enhanced rounded-full px-3 py-2 cursor-pointer hover:bg-accent"
+                      onClick={() => {
+                        setUserScrolled(false);
+                        setShouldAutoScroll(true);
                         if (parentRef.current) {
-                          // Scroll down 1px then back to 0 to trigger virtualizer update
-                          parentRef.current.scrollTop = 1;
-                          requestAnimationFrame(() => {
-                            if (parentRef.current) {
-                              parentRef.current.scrollTop = 0;
-                            }
+                          parentRef.current.scrollTo({
+                            top: parentRef.current.scrollHeight,
+                            behavior: 'smooth'
                           });
                         }
-                      }, 500); // Wait for smooth scroll to complete
-                    }
-                  }}
-                  className="px-3 py-2 hover:bg-accent rounded-none"
-                  title="Scroll to top"
-                >
-                  <ChevronUp className="h-4 w-4" />
-                </Button>
-                <div className="w-px h-4 bg-border" />
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    // Use virtualizer to scroll to the last item
-                    if (displayableMessages.length > 0) {
-                      // Scroll to bottom of the container
-                      const scrollElement = parentRef.current;
-                      if (scrollElement) {
-                        scrollElement.scrollTo({
-                          top: scrollElement.scrollHeight,
+                      }}
+                      title="New messages - click to scroll to bottom"
+                    >
+                      <div className="flex items-center gap-2 text-sm">
+                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                        <span>新消息</span>
+                        <ChevronDown className="h-3 w-3" />
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+                
+                {/* Traditional scroll controls */}
+                <div className="flex items-center floating-element backdrop-enhanced rounded-full overflow-hidden">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setUserScrolled(true);
+                      setShouldAutoScroll(false);
+                      if (parentRef.current) {
+                        parentRef.current.scrollTo({
+                          top: 0,
                           behavior: 'smooth'
                         });
                       }
-                    }
-                  }}
-                  className="px-3 py-2 hover:bg-accent rounded-none"
-                  title="Scroll to bottom"
-                >
-                  <ChevronDown className="h-4 w-4" />
-                </Button>
+                    }}
+                    className="px-3 py-2 hover:bg-accent rounded-none"
+                    title="Scroll to top"
+                  >
+                    <ChevronUp className="h-4 w-4" />
+                  </Button>
+                  <div className="w-px h-4 bg-border" />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setUserScrolled(false);
+                      setShouldAutoScroll(true);
+                      if (parentRef.current) {
+                        parentRef.current.scrollTo({
+                          top: parentRef.current.scrollHeight,
+                          behavior: 'smooth'
+                        });
+                      }
+                    }}
+                    className="px-3 py-2 hover:bg-accent rounded-none"
+                    title="Scroll to bottom"
+                  >
+                    <ChevronDown className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
             </motion.div>
           )}
@@ -1353,35 +1516,11 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               isLoading={isLoading}
               disabled={!projectPath}
               projectPath={projectPath}
+              getConversationContext={getConversationContext}
+              // Removed hasActiveSession - now using Claude Code SDK directly
             />
           </div>
 
-          {/* Token Counter - positioned above the input area */}
-          {totalTokens > 0 && (
-            <div
-              className="fixed left-0 right-0 z-30 pointer-events-none"
-              style={{
-                bottom: 'calc(100px + env(safe-area-inset-bottom))', // 在输入区域上方
-              }}
-            >
-              <div className="max-w-5xl mx-auto">
-                <div className="flex justify-end px-4 pb-2">
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.8 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.8 }}
-                    className="floating-element backdrop-enhanced rounded-full px-3 py-1 pointer-events-auto"
-                  >
-                    <div className="flex items-center gap-1.5 text-xs">
-                      <Hash className="h-3 w-3 text-muted-foreground" />
-                      <span className="font-mono">{totalTokens.toLocaleString()}</span>
-                      <span className="text-muted-foreground">tokens</span>
-                    </div>
-                  </motion.div>
-                </div>
-              </div>
-            </div>
-          )}
         </ErrorBoundary>
 
         {/* Timeline */}
@@ -1501,6 +1640,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           </DialogContent>
         </Dialog>
       )}
+
     </div>
   );
 };

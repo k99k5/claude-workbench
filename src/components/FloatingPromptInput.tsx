@@ -9,7 +9,8 @@ import {
   Zap,
   Square,
   Brain,
-  X
+  X,
+  Wand2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -43,6 +44,7 @@ interface FloatingPromptInputProps {
    * Project path for file picker
    */
   projectPath?: string;
+  // Removed hasActiveSession - now using Claude Code SDK directly
   /**
    * Optional className for styling
    */
@@ -51,6 +53,10 @@ interface FloatingPromptInputProps {
    * Callback when cancel is clicked (only during loading)
    */
   onCancel?: () => void;
+  /**
+   * Optional function to get conversation context for prompt enhancement
+   */
+  getConversationContext?: () => string[];
 }
 
 interface ImageAttachment {
@@ -177,8 +183,10 @@ const FloatingPromptInputInner = (
     disabled = false,
     defaultModel = "sonnet",
     projectPath,
+    // Removed hasActiveSession parameter
     className,
     onCancel,
+    getConversationContext,
   }: FloatingPromptInputProps,
   ref: React.Ref<FloatingPromptInputRef>,
 ) => {
@@ -196,6 +204,7 @@ const FloatingPromptInputInner = (
   const [cursorPosition, setCursorPosition] = useState(0);
   const [embeddedImages, setEmbeddedImages] = useState<string[]>([]);
   const [dragActive, setDragActive] = useState(false);
+  const [isEnhancing, setIsEnhancing] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const expandedTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -727,6 +736,56 @@ const FloatingPromptInputInner = (
     // File processing is handled by Tauri's onDragDropEvent
   };
 
+  // Handle enhance prompt using Claude Code SDK
+  const handleEnhancePrompt = async () => {
+    console.log('[handleEnhancePrompt] Started, current prompt:', prompt);
+    const trimmedPrompt = prompt.trim();
+    
+    if (!trimmedPrompt) {
+      console.log('[handleEnhancePrompt] Empty prompt, setting default message');
+      setPrompt("请描述您想要完成的任务，我会帮您优化这个提示词");
+      return;
+    }
+    
+    // Get conversation context if available
+    const context = getConversationContext ? getConversationContext() : undefined;
+    console.log('[handleEnhancePrompt] Got context with', context?.length || 0, 'messages');
+    
+    console.log('[handleEnhancePrompt] Enhancing with Claude Code SDK, model:', selectedModel);
+    setIsEnhancing(true);
+    
+    try {
+      // Call Claude Code SDK to enhance the prompt with context
+      const result = await api.enhancePrompt(trimmedPrompt, selectedModel, context);
+      console.log('[handleEnhancePrompt] Enhancement result:', result);
+      
+      if (result && result.trim()) {
+        setPrompt(result.trim());
+        // Focus the textarea
+        const target = isExpanded ? expandedTextareaRef.current : textareaRef.current;
+        target?.focus();
+      } else {
+        setPrompt(trimmedPrompt + '\n\n⚠️ 增强功能返回空结果，请重试');
+      }
+    } catch (error) {
+      console.error('[handleEnhancePrompt] Failed to enhance prompt:', error);
+      let errorMessage = '未知错误';
+      
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      } else if (typeof error === 'string') {
+        errorMessage = error;
+      } else if (error && typeof error === 'object' && 'message' in error) {
+        errorMessage = String(error.message);
+      }
+      
+      console.log('[handleEnhancePrompt] Error message to display:', errorMessage);
+      setPrompt(trimmedPrompt + `\n\n❌ ${errorMessage}`);
+    } finally {
+      setIsEnhancing(false);
+    }
+  };
+
   const handleRemoveImage = (index: number) => {
     // Remove the corresponding @mention from the prompt
     const imagePath = embeddedImages[index];
@@ -840,7 +899,7 @@ const FloatingPromptInputInner = (
                 onChange={handleTextChange}
                 onPaste={handlePaste}
                 placeholder="在这里输入您的提示词..."
-                className="min-h-[200px] resize-none"
+                className="min-h-[240px] resize-none"
                 disabled={disabled}
                 onDragEnter={handleDrag}
                 onDragLeave={handleDrag}
@@ -1117,7 +1176,7 @@ const FloatingPromptInputInner = (
                   placeholder={dragActive ? "Drop images here..." : "Ask Claude anything..."}
                   disabled={disabled}
                   className={cn(
-                    "min-h-[44px] max-h-[120px] resize-none pr-10",
+                    "min-h-[56px] max-h-[160px] resize-none pr-10",
                     dragActive && "border-primary"
                   )}
                   rows={1}
@@ -1157,6 +1216,26 @@ const FloatingPromptInputInner = (
                   )}
                 </AnimatePresence>
               </div>
+
+              {/* Enhance Button */}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      onClick={handleEnhancePrompt}
+                      disabled={isEnhancing || isLoading || disabled}
+                      variant="outline"
+                      size="icon"
+                      className="h-10 w-10"
+                    >
+                      <Wand2 className={cn("h-4 w-4", isEnhancing && "animate-spin")} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>优化提示词</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
 
               {/* Send/Stop Button */}
               <Button

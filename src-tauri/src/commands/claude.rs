@@ -11,7 +11,10 @@ use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tauri_plugin_shell::ShellExt;
 use regex;
-use crate::claude_binary::{ClaudeInstallation, InstallationType};
+
+// Windows-specific imports
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 
 /// Global state to track current Claude process
 pub struct ClaudeProcessState {
@@ -35,7 +38,7 @@ pub struct Project {
     pub path: String,
     /// List of session IDs (JSONL file names without extension)
     pub sessions: Vec<String>,
-    /// Unix timestamp when the project directory was created
+    /// Unix timestamp of the latest activity (session modification or project creation)
     pub created_at: u64,
 }
 
@@ -136,7 +139,7 @@ fn find_claude_binary(app_handle: &AppHandle) -> Result<String, String> {
 }
 
 /// Gets the path to the ~/.claude directory
-fn get_claude_dir() -> Result<PathBuf> {
+pub fn get_claude_dir() -> Result<PathBuf> {
     let claude_dir = dirs::home_dir()
         .context("Could not find home directory")?
         .join(".claude");
@@ -167,7 +170,20 @@ fn get_project_path_from_sessions(project_dir: &PathBuf) -> Result<String, Strin
                         // Parse the JSON and extract cwd
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&first_line) {
                             if let Some(cwd) = json.get("cwd").and_then(|v| v.as_str()) {
-                                return Ok(cwd.to_string());
+                                // Apply consistent path normalization to ensure project paths are unified
+                                let normalized_cwd = std::path::Path::new(cwd)
+                                    .canonicalize()
+                                    .map(|p| {
+                                        let path_str = p.to_string_lossy().to_string();
+                                        // Remove Windows long path prefix for cleaner display
+                                        if path_str.starts_with("\\\\?\\") {
+                                            path_str[4..].to_string()
+                                        } else {
+                                            path_str
+                                        }
+                                    })
+                                    .unwrap_or_else(|_| cwd.to_string());
+                                return Ok(normalized_cwd);
                             }
                         }
                     }
@@ -179,6 +195,14 @@ fn get_project_path_from_sessions(project_dir: &PathBuf) -> Result<String, Strin
     Err("Could not determine project path from session files".to_string())
 }
 
+/// Encodes a project path to match Claude CLI's encoding scheme
+/// Uses single hyphens to separate path components
+fn encode_project_path(path: &str) -> String {
+    path.replace("\\", "-")
+        .replace("/", "-")
+        .replace(":", "")
+}
+
 /// Decodes a project directory name back to its original path
 /// The directory names in ~/.claude/projects are encoded paths
 /// DEPRECATED: Use get_project_path_from_sessions instead when possible
@@ -186,7 +210,66 @@ fn decode_project_path(encoded: &str) -> String {
     // This is a fallback - the encoding isn't reversible when paths contain hyphens
     // For example: -Users-mufeedvh-dev-jsonl-viewer could be /Users/mufeedvh/dev/jsonl-viewer
     // or /Users/mufeedvh/dev/jsonl/viewer
-    encoded.replace('-', "/")
+    let decoded = encoded.replace('-', "/");
+    
+    // On Windows, ensure we use backslashes for consistency
+    #[cfg(target_os = "windows")]
+    {
+        let mut windows_path = decoded.replace('/', "\\");
+        // Remove Windows long path prefix if present
+        if windows_path.starts_with("\\\\?\\") {
+            windows_path = windows_path[4..].to_string();
+        }
+        windows_path
+    }
+    
+    #[cfg(not(target_os = "windows"))]
+    {
+        decoded
+    }
+}
+
+/// Normalize a path for comparison to detect duplicates
+/// This handles case sensitivity, path separators, and trailing slashes
+fn normalize_path_for_comparison(path: &str) -> String {
+    let mut normalized = path.to_lowercase();
+    
+    // Remove Windows long path prefix if present (\\?\ or \\?\UNC\)
+    if normalized.starts_with("\\\\?\\") {
+        normalized = normalized[4..].to_string();
+    } else if normalized.starts_with("\\\\?\\unc\\") {
+        normalized = format!("\\\\{}", &normalized[8..]);
+    }
+    
+    // Normalize path separators - convert all to forward slashes for comparison
+    normalized = normalized.replace('\\', "/");
+    
+    // Remove trailing slash if present
+    if normalized.ends_with('/') && normalized.len() > 1 {
+        normalized.pop();
+    }
+    
+    // Remove leading slash for relative path comparison
+    if normalized.starts_with('/') {
+        normalized = normalized[1..].to_string();
+    }
+    
+    // Handle Windows drive letters - convert C:/ to c
+    if normalized.len() >= 2 && normalized.chars().nth(1) == Some(':') {
+        if normalized.len() == 2 {
+            normalized = normalized.chars().take(1).collect();
+        } else if normalized.chars().nth(2) == Some('/') {
+            let drive = normalized.chars().take(1).collect::<String>();
+            let rest = &normalized[3..];
+            normalized = if rest.is_empty() { 
+                drive 
+            } else { 
+                format!("{}/{}", drive, rest)
+            };
+        }
+    }
+    
+    normalized
 }
 
 /// Extracts the first valid user message from a JSONL file
@@ -231,43 +314,74 @@ fn extract_first_user_message(jsonl_path: &PathBuf) -> (Option<String>, Option<S
 /// Escapes prompt content for safe command line usage
 /// Handles multiline content, special characters, and Windows-specific issues
 fn escape_prompt_for_cli(prompt: &str) -> String {
+    let trimmed = prompt.trim();
+    let is_slash_command = trimmed.starts_with('/');
+    
     // For Windows, we need to be extra careful with command line escaping
     #[cfg(target_os = "windows")]
     {
-        // Replace problematic characters
-        let escaped = prompt
-            .replace('\r', "\\r")  // Carriage return
-            .replace('\n', "\\n")  // Line feed
-            .replace('\"', "\\\"") // Double quotes
-            .replace('\\', "\\\\") // Backslashes
-            .replace('\t', "\\t")  // Tabs
-            .replace('\0', "");    // Remove null characters
-        
-        // If the prompt contains spaces or special characters, wrap in quotes
-        if escaped.contains(' ') || escaped.contains('&') || escaped.contains('|') 
-            || escaped.contains('<') || escaped.contains('>') || escaped.contains('^') {
-            format!("\"{}\"", escaped)
+        if is_slash_command {
+            // Slash commands should be passed directly to Claude CLI without quotes
+            // Only clean up whitespace and remove null characters
+            let cleaned = trimmed
+                .replace('\r', " ")    // Replace carriage returns with spaces
+                .replace('\n', " ")    // Replace line feeds with spaces
+                .replace('\0', "")     // Remove null characters
+                .trim()                // Remove leading/trailing whitespace
+                .to_string();
+            
+            // Return slash command without quotes - Claude CLI expects raw slash commands
+            cleaned
         } else {
-            escaped
+            // Regular prompts get full escaping treatment
+            let escaped = prompt
+                .replace('\r', "\\r")  // Carriage return
+                .replace('\n', "\\n")  // Line feed
+                .replace('\"', "\\\"") // Double quotes
+                .replace('\\', "\\\\") // Backslashes
+                .replace('\t', "\\t")  // Tabs
+                .replace('\0', "");    // Remove null characters
+            
+            // If the prompt contains spaces or special characters, wrap in quotes
+            if escaped.contains(' ') || escaped.contains('&') || escaped.contains('|') 
+                || escaped.contains('<') || escaped.contains('>') || escaped.contains('^') {
+                format!("\"{}\"", escaped)
+            } else {
+                escaped
+            }
         }
     }
     
     #[cfg(not(target_os = "windows"))]
     {
-        // For Unix-like systems, escape shell metacharacters
-        let mut escaped = prompt
-            .replace('\\', "\\\\")  // Backslashes first
-            .replace('\n', "\\n")   // Newlines
-            .replace('\r', "\\r")   // Carriage returns
-            .replace('\t', "\\t")   // Tabs
-            .replace('\"', "\\\"")  // Double quotes
-            .replace('\'', "\\'")   // Single quotes
-            .replace('$', "\\$")    // Dollar signs
-            .replace('`', "\\`")    // Backticks
-            .replace('\0', "");     // Remove null characters
-        
-        // Wrap in single quotes for safety
-        format!("'{}'", escaped.replace('\'', "'\"'\"'"))
+        if is_slash_command {
+            // Slash commands should be passed directly to Claude CLI without quotes
+            // Only clean up whitespace and remove null characters
+            let cleaned = trimmed
+                .replace('\r', " ")     // Replace carriage returns with spaces
+                .replace('\n', " ")     // Replace line feeds with spaces
+                .replace('\0', "")      // Remove null characters
+                .trim()                 // Remove leading/trailing whitespace
+                .to_string();
+            
+            // Return slash command without quotes - Claude CLI expects raw slash commands
+            cleaned
+        } else {
+            // For Unix-like systems, escape shell metacharacters
+            let mut escaped = prompt
+                .replace('\\', "\\\\")  // Backslashes first
+                .replace('\n', "\\n")   // Newlines
+                .replace('\r', "\\r")   // Carriage returns
+                .replace('\t', "\\t")   // Tabs
+                .replace('\"', "\\\"")  // Double quotes
+                .replace('\'', "\\'")   // Single quotes
+                .replace('$', "\\$")    // Dollar signs
+                .replace('`', "\\`")    // Backticks
+                .replace('\0', "");     // Remove null characters
+            
+            // Wrap in single quotes for safety
+            format!("'{}'", escaped.replace('\'', "'\"'\"'"))
+        }
     }
 }
 
@@ -315,8 +429,10 @@ fn create_command_with_env(program: &str) -> Command {
     tokio_cmd
 }
 
+
+
 /// Helper function to spawn Claude process and handle streaming
-/// Enhanced for Windows compatibility
+/// Enhanced for Windows compatibility with router support
 fn create_system_command(
     claude_path: &str,
     args: Vec<String>,
@@ -345,10 +461,7 @@ fn create_windows_command(
     
     // On Windows, ensure the command runs without creating a console window
     #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
     
     Ok(cmd)
 }
@@ -416,8 +529,10 @@ pub async fn list_projects() -> Result<Vec<Project>, String> {
                     }
                 };
 
-                // List all JSONL files (sessions) in this project directory
+                // List all JSONL files (sessions) in this project directory and find latest activity
                 let mut sessions = Vec::new();
+                let mut latest_activity = created_at; // Default to project creation time
+                
                 if let Ok(session_entries) = fs::read_dir(&path) {
                     for session_entry in session_entries.flatten() {
                         let session_path = session_entry.path();
@@ -427,6 +542,21 @@ pub async fn list_projects() -> Result<Vec<Project>, String> {
                             if let Some(session_id) = session_path.file_stem().and_then(|s| s.to_str())
                             {
                                 sessions.push(session_id.to_string());
+                                
+                                // Check the modification time of this session file
+                                if let Ok(session_metadata) = fs::metadata(&session_path) {
+                                    let session_modified = session_metadata
+                                        .modified()
+                                        .unwrap_or(SystemTime::UNIX_EPOCH)
+                                        .duration_since(SystemTime::UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_secs();
+                                    
+                                    // Update latest activity if this session is newer
+                                    if session_modified > latest_activity {
+                                        latest_activity = session_modified;
+                                    }
+                                }
                             }
                         }
                     }
@@ -436,7 +566,7 @@ pub async fn list_projects() -> Result<Vec<Project>, String> {
                     id: dir_name.to_string(),
                     path: project_path,
                     sessions,
-                    created_at,
+                    created_at: latest_activity, // Use latest activity time instead of creation time
                 });
             }
         }
@@ -445,11 +575,77 @@ pub async fn list_projects() -> Result<Vec<Project>, String> {
     }
 
 
-    // Sort projects by creation time (newest first)
-    all_projects.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    // Remove duplicate projects based on normalized paths and merge sessions
+    let mut unique_projects_map: std::collections::HashMap<String, Project> = std::collections::HashMap::new();
+    let original_count = all_projects.len();
+    
+    for project in all_projects {
+        // Normalize the path for comparison (convert to lowercase, normalize separators)
+        let normalized_path = normalize_path_for_comparison(&project.path);
+        
+        match unique_projects_map.get_mut(&normalized_path) {
+            Some(existing_project) => {
+                // Merge sessions from duplicate project
+                log::debug!("Merging duplicate project with path: {} (existing: {}, new: {})", 
+                    project.path, existing_project.id, project.id);
+                
+                // Merge sessions - avoid duplicates
+                let mut new_sessions = project.sessions;
+                for session in new_sessions.drain(..) {
+                    if !existing_project.sessions.contains(&session) {
+                        existing_project.sessions.push(session);
+                    }
+                }
+                
+                // Update to the latest activity time
+                if project.created_at > existing_project.created_at {
+                    existing_project.created_at = project.created_at;
+                }
+                
+                // Choose the better project ID: prefer shorter, more canonical directory names
+                // This helps consolidate projects that were created with different path encodings
+                let should_update_id = 
+                    // Prefer shorter project IDs (usually more canonical)
+                    project.id.len() < existing_project.id.len() ||
+                    // Prefer IDs without consecutive dashes (better encoding)
+                    (project.id.len() == existing_project.id.len() && 
+                     !project.id.contains("--") && existing_project.id.contains("--")) ||
+                    // Prefer mixed case over all lowercase (original casing)
+                    (project.id.len() == existing_project.id.len() && 
+                     project.id.chars().any(|c| c.is_uppercase()) && 
+                     existing_project.id.chars().all(|c| !c.is_uppercase()));
+                
+                if should_update_id {
+                    log::debug!("Updating project ID from '{}' to '{}'", existing_project.id, project.id);
+                    existing_project.id = project.id;
+                }
+            }
+            None => {
+                // First time seeing this path
+                unique_projects_map.insert(normalized_path, project);
+            }
+        }
+    }
+    
+    // Convert map back to vector and remove duplicate sessions within each project
+    let mut unique_projects: Vec<Project> = unique_projects_map.into_values()
+        .map(|mut project| {
+            // Remove duplicate sessions within the project
+            let mut unique_sessions = std::collections::HashSet::new();
+            project.sessions.retain(|session| unique_sessions.insert(session.clone()));
+            project
+        })
+        .collect();
 
-    log::info!("Found {} total projects (filtered {} hidden)", all_projects.len(), hidden_projects.len());
-    Ok(all_projects)
+    // Sort projects by latest activity time (most recently active first)
+    unique_projects.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+    log::info!("Found {} unique projects (filtered {} hidden, {} duplicates)", 
+        unique_projects.len(), 
+        hidden_projects.len(),
+        original_count - unique_projects.len()
+    );
+    Ok(unique_projects)
 }
 
 /// Gets sessions for a specific project
@@ -608,15 +804,104 @@ pub async fn restore_project(project_id: String) -> Result<String, String> {
     }
 }
 
-/// Lists all hidden projects
+/// Permanently delete a project from the file system with intelligent directory detection
+#[tauri::command]
+pub async fn delete_project_permanently(project_id: String) -> Result<String, String> {
+    log::info!("Permanently deleting project: {}", project_id);
+
+    let claude_dir = get_claude_dir().map_err(|e| e.to_string())?;
+    let projects_dir = claude_dir.join("projects");
+    let project_dir = projects_dir.join(&project_id);
+    
+    let mut actual_project_dir = None;
+    let mut actual_project_id = project_id.clone();
+    
+    // Check if the project directory exists directly
+    if project_dir.exists() {
+        actual_project_dir = Some(project_dir);
+    } else {
+        // Try to find the actual directory with intelligent matching
+        if let Ok(entries) = fs::read_dir(&projects_dir) {
+            let target_normalized_path = normalize_path_for_comparison(&decode_project_path(&project_id));
+            
+            for entry in entries.flatten() {
+                if entry.path().is_dir() {
+                    if let Some(dir_name) = entry.file_name().to_str() {
+                        let candidate_path = match get_project_path_from_sessions(&entry.path()) {
+                            Ok(path) => path,
+                            Err(_) => decode_project_path(dir_name),
+                        };
+                        
+                        if normalize_path_for_comparison(&candidate_path) == target_normalized_path {
+                            actual_project_dir = Some(entry.path());
+                            actual_project_id = dir_name.to_string();
+                            log::info!("Found actual project directory: {} -> {}", project_id, actual_project_id);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Check if we found a directory to delete
+    let dir_to_delete = actual_project_dir.ok_or_else(|| {
+        if project_id.contains("--") && !project_id.contains("---") {
+            format!("项目目录不存在。可能已被手动删除，或使用了不同的编码格式。原始ID: {}", project_id)
+        } else {
+            format!("项目目录不存在: {:?}", projects_dir.join(&project_id))
+        }
+    })?;
+    
+    // Remove the project directory and all its contents
+    fs::remove_dir_all(&dir_to_delete)
+        .map_err(|e| format!("Failed to delete project directory: {}", e))?;
+    
+    // Remove all variants from hidden projects list (both original and actual IDs)
+    let hidden_projects_file = claude_dir.join("hidden_projects.json");
+    if hidden_projects_file.exists() {
+        let mut hidden_projects: Vec<String> = {
+            let content = fs::read_to_string(&hidden_projects_file)
+                .map_err(|e| format!("Failed to read hidden projects file: {}", e))?;
+            serde_json::from_str(&content).unwrap_or_else(|_| Vec::new())
+        };
+        
+        // Remove both original and actual project IDs from hidden list
+        let original_len = hidden_projects.len();
+        hidden_projects.retain(|id| id != &project_id && id != &actual_project_id);
+        
+        if hidden_projects.len() != original_len {
+            // Save updated list
+            let content = serde_json::to_string_pretty(&hidden_projects)
+                .map_err(|e| format!("Failed to serialize hidden projects: {}", e))?;
+            fs::write(&hidden_projects_file, content)
+                .map_err(|e| format!("Failed to write hidden projects file: {}", e))?;
+            
+            log::info!("Removed project from hidden list: {} (and variants)", project_id);
+        }
+    }
+    
+    let result_msg = if actual_project_id != project_id {
+        format!("项目 '{}' (实际目录: '{}') 已永久删除", project_id, actual_project_id)
+    } else {
+        format!("项目 '{}' 已永久删除", project_id)
+    };
+    
+    log::info!("{}", result_msg);
+    
+    Ok(result_msg)
+}
+
+/// Lists all hidden projects with intelligent directory existence check
 #[tauri::command]
 pub async fn list_hidden_projects() -> Result<Vec<String>, String> {
-    log::info!("Listing hidden projects");
+    log::info!("Listing hidden projects with directory validation");
 
     let claude_dir = get_claude_dir().map_err(|e| e.to_string())?;
     let hidden_projects_file = claude_dir.join("hidden_projects.json");
+    let projects_dir = claude_dir.join("projects");
     
-    let hidden_projects: Vec<String> = if hidden_projects_file.exists() {
+    let mut hidden_projects: Vec<String> = if hidden_projects_file.exists() {
         let content = fs::read_to_string(&hidden_projects_file)
             .map_err(|e| format!("Failed to read hidden projects file: {}", e))?;
         serde_json::from_str(&content).unwrap_or_else(|_| Vec::new())
@@ -624,8 +909,72 @@ pub async fn list_hidden_projects() -> Result<Vec<String>, String> {
         Vec::new()
     };
 
-    log::info!("Found {} hidden projects", hidden_projects.len());
-    Ok(hidden_projects)
+    // Filter out hidden projects whose directories no longer exist
+    // and find actual existing project directories for each hidden project
+    let mut validated_hidden_projects = Vec::new();
+    let mut projects_to_remove = Vec::new();
+    
+    for hidden_project_id in &hidden_projects {
+        let project_dir = projects_dir.join(hidden_project_id);
+        
+        if project_dir.exists() {
+            // Direct match found
+            validated_hidden_projects.push(hidden_project_id.clone());
+            log::debug!("Hidden project directory exists: {}", hidden_project_id);
+        } else {
+            // Try to find alternative formats (e.g., single vs double dash)
+            let mut found_alternative = false;
+            
+            if let Ok(entries) = fs::read_dir(&projects_dir) {
+                let normalized_path = if let Ok(path) = get_project_path_from_sessions(&project_dir) {
+                    normalize_path_for_comparison(&path)
+                } else {
+                    normalize_path_for_comparison(&decode_project_path(hidden_project_id))
+                };
+                
+                for entry in entries.flatten() {
+                    if entry.path().is_dir() {
+                        if let Some(dir_name) = entry.file_name().to_str() {
+                            let candidate_path = match get_project_path_from_sessions(&entry.path()) {
+                                Ok(path) => path,
+                                Err(_) => decode_project_path(dir_name),
+                            };
+                            
+                            if normalize_path_for_comparison(&candidate_path) == normalized_path {
+                                // Found matching project with different encoding
+                                validated_hidden_projects.push(dir_name.to_string());
+                                found_alternative = true;
+                                log::debug!("Found alternative format for hidden project: {} -> {}", hidden_project_id, dir_name);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if !found_alternative {
+                // No matching directory found - mark for removal from hidden list
+                projects_to_remove.push(hidden_project_id.clone());
+                log::debug!("Hidden project directory not found, will remove: {}", hidden_project_id);
+            }
+        }
+    }
+    
+    // Clean up hidden_projects.json if any projects were manually deleted
+    if !projects_to_remove.is_empty() {
+        hidden_projects.retain(|id| !projects_to_remove.contains(id));
+        
+        let content = serde_json::to_string_pretty(&hidden_projects)
+            .map_err(|e| format!("Failed to serialize hidden projects: {}", e))?;
+        fs::write(&hidden_projects_file, content)
+            .map_err(|e| format!("Failed to write updated hidden projects file: {}", e))?;
+            
+        log::info!("Cleaned up {} non-existent hidden projects from list", projects_to_remove.len());
+    }
+
+    log::info!("Found {} valid hidden projects", validated_hidden_projects.len());
+    
+    Ok(validated_hidden_projects)
 }
 
 /// Reads the Claude settings file
@@ -897,17 +1246,38 @@ pub async fn save_claude_settings(settings: serde_json::Value) -> Result<String,
     let settings_path = claude_dir.join("settings.json");
     log::info!("Settings path: {:?}", settings_path);
 
-    // Extract the actual settings from the wrapper object
-    let actual_settings = if let Some(settings_obj) = settings.get("settings") {
-        log::info!("Extracted settings from wrapper object");
-        settings_obj
+    // Read existing settings to preserve unknown fields
+    let mut existing_settings = if settings_path.exists() {
+        let content = fs::read_to_string(&settings_path).ok();
+        if let Some(content) = content {
+            serde_json::from_str::<serde_json::Value>(&content).ok()
+        } else {
+            None
+        }
     } else {
-        log::info!("Using settings directly (no wrapper)");
-        &settings
-    };
+        None
+    }.unwrap_or(serde_json::json!({}));
+
+    log::info!("Existing settings: {}", existing_settings);
+
+    // Use settings directly - no wrapper expected from frontend
+    let actual_settings = &settings;
+    log::info!("Using settings directly: {}", actual_settings);
+
+    // Merge the new settings with existing settings
+    // This preserves unknown fields that the app doesn't manage
+    if let (Some(existing_obj), Some(new_obj)) = (existing_settings.as_object_mut(), actual_settings.as_object()) {
+        for (key, value) in new_obj {
+            existing_obj.insert(key.clone(), value.clone());
+        }
+        log::info!("Merged settings: {}", existing_settings);
+    } else {
+        // If either is not an object, just use the new settings
+        existing_settings = actual_settings.clone();
+    }
 
     // Pretty print the JSON with 2-space indentation
-    let json_string = serde_json::to_string_pretty(actual_settings)
+    let json_string = serde_json::to_string_pretty(&existing_settings)
         .map_err(|e| {
             let error_msg = format!("Failed to serialize settings: {}", e);
             log::error!("{}", error_msg);
@@ -1103,21 +1473,37 @@ pub async fn execute_claude_code(
 
     let claude_path = find_claude_binary(&app)?;
     
+    
     // Escape prompt for command line - handle multiline content properly
     let escaped_prompt = escape_prompt_for_cli(&prompt);
     
-    let args = vec![
-        "-p".to_string(), // Use -p (print) flag for non-interactive output
-        escaped_prompt,
-        "--model".to_string(),
-        model.clone(),
-        "--output-format".to_string(),
-        "stream-json".to_string(),
-        "--verbose".to_string(),
-        "--dangerously-skip-permissions".to_string(),
-    ];
+    // Build arguments based on whether it's a slash command
+    let args = if prompt.trim().starts_with('/') {
+        // For slash commands, use the --prompt flag explicitly
+        vec![
+            "--prompt".to_string(),
+            escaped_prompt,
+            "--model".to_string(),
+            model.clone(),
+            "--output-format".to_string(),
+            "stream-json".to_string(),
+            "--verbose".to_string(),
+            "--dangerously-skip-permissions".to_string(),
+        ]
+    } else {
+        // For regular prompts, pass as positional argument
+        vec![
+            escaped_prompt,
+            "--model".to_string(),
+            model.clone(),
+            "--output-format".to_string(),
+            "stream-json".to_string(),
+            "--verbose".to_string(),
+            "--dangerously-skip-permissions".to_string(),
+        ]
+    };
 
-    // Only use system binary - no sidecar support
+    // Create command
     let cmd = create_system_command(&claude_path, args, &project_path)?;
     spawn_claude_process(app, cmd, prompt, model, project_path).await
 }
@@ -1139,22 +1525,39 @@ pub async fn continue_claude_code(
 
     let claude_path = find_claude_binary(&app)?;
     
+    
     // Escape prompt for command line - handle multiline content properly
     let escaped_prompt = escape_prompt_for_cli(&prompt);
     
-    let args = vec![
-        "-c".to_string(), // Continue the most recent conversation
-        "-p".to_string(),
-        escaped_prompt,
-        "--model".to_string(),
-        model.clone(),
-        "--output-format".to_string(),
-        "stream-json".to_string(),
-        "--verbose".to_string(),
-        "--dangerously-skip-permissions".to_string(),
-    ];
+    // Build arguments based on whether it's a slash command
+    let args = if prompt.trim().starts_with('/') {
+        // For slash commands, use the --prompt flag explicitly
+        vec![
+            "-c".to_string(), // Continue the most recent conversation
+            "--prompt".to_string(),
+            escaped_prompt,
+            "--model".to_string(),
+            model.clone(),
+            "--output-format".to_string(),
+            "stream-json".to_string(),
+            "--verbose".to_string(),
+            "--dangerously-skip-permissions".to_string(),
+        ]
+    } else {
+        // For regular prompts, pass as positional argument
+        vec![
+            "-c".to_string(), // Continue the most recent conversation
+            escaped_prompt,
+            "--model".to_string(),
+            model.clone(),
+            "--output-format".to_string(),
+            "stream-json".to_string(),
+            "--verbose".to_string(),
+            "--dangerously-skip-permissions".to_string(),
+        ]
+    };
 
-    // Only use system binary - no sidecar support
+    // Create command
     let cmd = create_system_command(&claude_path, args, &project_path)?;
     spawn_claude_process(app, cmd, prompt, model, project_path).await
 }
@@ -1180,12 +1583,13 @@ pub async fn resume_claude_code(
     let session_dir = format!("{}/.claude/projects/{}", 
         std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE"))
             .unwrap_or_else(|_| "~".to_string()), 
-        project_path.replace("\\", "--").replace("/", "--").replace(":", "")
+        encode_project_path(&project_path)
     );
     log::info!("Expected session file directory: {}", session_dir);
     log::info!("Session ID to resume: {}", session_id);
 
     let claude_path = find_claude_binary(&app)?;
+    
     
     // Escape prompt for command line - handle multiline content properly
     let escaped_prompt = escape_prompt_for_cli(&prompt);
@@ -1194,7 +1598,6 @@ pub async fn resume_claude_code(
     let args = vec![
         "--resume".to_string(),
         session_id.clone(),
-        "-p".to_string(),
         escaped_prompt,
         "--model".to_string(),
         model.clone(),
@@ -1206,7 +1609,7 @@ pub async fn resume_claude_code(
 
     log::info!("Resume command: claude {}", args.join(" "));
 
-    // Only use system binary - no sidecar support
+    // Create command
     let cmd = create_system_command(&claude_path, args, &project_path)?;
     
     // Try to spawn the process - if it fails, fall back to continue mode
@@ -1288,8 +1691,7 @@ pub async fn cancel_claude_execution(
                     if let Some(pid) = pid {
                         log::info!("Attempting system kill as last resort for PID: {}", pid);
                         let kill_result = if cfg!(target_os = "windows") {
-                            use std::os::windows::process::CommandExt;
-                            std::process::Command::new("taskkill")
+                                                std::process::Command::new("taskkill")
                                 .args(["/F", "/PID", &pid.to_string()])
                                 .creation_flags(0x08000000) // CREATE_NO_WINDOW
                                 .output()
@@ -1444,6 +1846,11 @@ async fn spawn_claude_process(app: AppHandle, mut cmd: Command, prompt: String, 
                                     log::info!("Registered Claude session with run_id: {}", run_id);
                                     let mut run_id_guard = run_id_holder_clone.lock().unwrap();
                                     *run_id_guard = Some(run_id);
+                                    
+                                    // Claude CLI already creates the project folder and session files automatically
+                                    // We don't need to create them manually, which was causing duplicate projects
+                                    // The Claude CLI handles all project management internally
+                                    log::info!("Claude CLI will handle project creation for session: {}", claude_session_id);
                                 }
                                 Err(e) => {
                                     log::error!("Failed to register Claude session: {}", e);
@@ -2355,7 +2762,6 @@ pub async fn validate_hook_command(command: String) -> Result<serde_json::Value,
     // Add CREATE_NO_WINDOW flag on Windows to prevent terminal window popup
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
     
@@ -2400,7 +2806,6 @@ pub async fn set_custom_claude_path(app: AppHandle, custom_path: String) -> Resu
     // Add CREATE_NO_WINDOW flag on Windows to prevent terminal window popup
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
     
@@ -2515,3 +2920,391 @@ pub async fn clear_custom_claude_path(app: AppHandle) -> Result<(), String> {
         Err("Failed to get app data directory".to_string())
     }
 }
+
+
+/// Enhance a prompt using local Claude Code CLI
+#[tauri::command]
+pub async fn enhance_prompt(
+    prompt: String, 
+    model: String, 
+    context: Option<Vec<String>>, 
+    _app: AppHandle
+) -> Result<String, String> {
+    log::info!("Enhancing prompt using local Claude Code CLI with context");
+    
+    if prompt.trim().is_empty() {
+        return Ok("请输入需要增强的提示词".to_string());
+    }
+
+    // 构建会话上下文信息
+    let context_section = if let Some(recent_messages) = context {
+        if !recent_messages.is_empty() {
+            log::info!("Using {} context messages for enhancement", recent_messages.len());
+            let context_str = recent_messages.join("\n---\n");
+            format!("\n\nRecent conversation context:\n{}\n", context_str)
+        } else {
+            log::info!("Context provided but empty");
+            String::new()
+        }
+    } else {
+        log::info!("No context provided for enhancement");
+        String::new()
+    };
+
+    // 创建提示词增强的请求
+    let enhancement_request = format!(
+        "You are helping to enhance a prompt based on the current conversation context. {}\
+        \n\
+        Please improve and optimize this prompt to make it more effective, clear, and specific. Focus on:\n\
+        1. Making it relevant to the current conversation context\n\
+        2. Adding clarity and structure\n\
+        3. Making it more actionable and specific\n\
+        4. Including relevant technical details from the context\n\
+        5. Following prompt engineering best practices\n\n\
+        Original prompt:\n{}\n\n\
+        Please provide only the improved prompt as your response in Chinese, without explanations or commentary.",
+        context_section,
+        prompt.trim()
+    );
+
+    log::info!("Calling Claude Code CLI with stdin input");
+
+    // 尝试找到Claude Code CLI的完整路径
+    let claude_path = find_claude_executable().await?;
+    
+    // 调用 Claude Code CLI，使用stdin输入
+    let mut command = tokio::process::Command::new(&claude_path);
+    command.args(&[
+        "--print",
+        "--model", &model
+    ]);
+
+    // 设置stdin
+    command.stdin(std::process::Stdio::piped());
+    command.stdout(std::process::Stdio::piped());
+    command.stderr(std::process::Stdio::piped());
+
+    // 在Windows上隐藏控制台窗口
+    #[cfg(target_os = "windows")]
+    {
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW flag
+    }
+
+    // 设置工作目录（如果需要）
+    if let Some(home_dir) = dirs::home_dir() {
+        command.current_dir(home_dir);
+    }
+
+    // 确保环境变量正确设置，包括用户环境
+    if let Ok(path) = std::env::var("PATH") {
+        command.env("PATH", path);
+    }
+    
+    // 添加常见的npm路径到PATH
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        let npm_path = std::path::Path::new(&appdata).join("npm");
+        if let Some(npm_str) = npm_path.to_str() {
+            if let Ok(current_path) = std::env::var("PATH") {
+                let new_path = format!("{};{}", current_path, npm_str);
+                command.env("PATH", new_path);
+            }
+        }
+    }
+
+    // 启动进程
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("无法启动Claude Code命令: {}. 请确保Claude Code已正确安装并登录。", e))?;
+
+    // 写入增强请求到stdin
+    if let Some(mut stdin) = child.stdin.take() {
+        use tokio::io::AsyncWriteExt;
+        stdin.write_all(enhancement_request.as_bytes()).await
+            .map_err(|e| format!("无法写入输入到Claude Code: {}", e))?;
+        stdin.shutdown().await
+            .map_err(|e| format!("无法关闭stdin: {}", e))?;
+    }
+
+    // 等待命令完成并获取输出
+    let output = child.wait_with_output().await
+        .map_err(|e| format!("等待Claude Code命令完成失败: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        log::error!("Claude Code command failed: {}", stderr);
+        return Err(format!("Claude Code执行失败: {}", stderr));
+    }
+
+    let enhanced_prompt = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    
+    if enhanced_prompt.is_empty() {
+        return Err("Claude Code返回了空的响应".to_string());
+    }
+
+    log::info!("Successfully enhanced prompt: {} -> {} chars", prompt.len(), enhanced_prompt.len());
+    Ok(enhanced_prompt)
+}
+
+/// Find Claude Code executable in various locations
+async fn find_claude_executable() -> Result<String, String> {
+    // Common locations for Claude Code
+    let possible_paths = vec![
+        "claude".to_string(),
+        "claude.cmd".to_string(),
+        "claude.exe".to_string(),
+    ];
+
+    // Try to find in PATH first
+    for path in &possible_paths {
+        let mut cmd = tokio::process::Command::new(path);
+        cmd.arg("--version");
+        
+        // 在Windows上隐藏控制台窗口
+        #[cfg(target_os = "windows")]
+        {
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW flag
+        }
+        
+        if let Ok(output) = cmd.output().await {
+            if output.status.success() {
+                log::info!("Found Claude Code at: {}", path);
+                return Ok(path.clone());
+            }
+        }
+    }
+
+    // Try common Windows npm global locations
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        let npm_path = std::path::Path::new(&appdata).join("npm");
+        let possible_npm_paths = vec![
+            npm_path.join("claude.cmd"),
+            npm_path.join("claude"),
+            npm_path.join("claude.exe"),
+        ];
+
+        for path in possible_npm_paths {
+            if path.exists() {
+                if let Some(path_str) = path.to_str() {
+                    // Test if it works
+                    let mut cmd = tokio::process::Command::new(path_str);
+                    cmd.arg("--version");
+                    
+                    // 在Windows上隐藏控制台窗口
+                    #[cfg(target_os = "windows")]
+                    {
+                        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW flag
+                    }
+                    
+                    if let Ok(output) = cmd.output().await {
+                        if output.status.success() {
+                            log::info!("Found Claude Code at: {}", path_str);
+                            return Ok(path_str.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Try global npm prefix location
+    let mut npm_cmd = tokio::process::Command::new("npm");
+    npm_cmd.args(&["config", "get", "prefix"]);
+    
+    // 在Windows上隐藏控制台窗口
+    #[cfg(target_os = "windows")]
+    {
+        npm_cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW flag
+    }
+    
+    if let Ok(output) = npm_cmd.output().await
+    {
+        if output.status.success() {
+            let prefix_string = String::from_utf8_lossy(&output.stdout);
+            let prefix = prefix_string.trim();
+            let claude_path = std::path::Path::new(prefix).join("claude.cmd");
+            if claude_path.exists() {
+                if let Some(path_str) = claude_path.to_str() {
+                    log::info!("Found Claude Code at npm prefix: {}", path_str);
+                    return Ok(path_str.to_string());
+                }
+            }
+        }
+    }
+
+    Err("无法找到Claude Code可执行文件。请确保Claude Code已正确安装。您可以运行 'npm install -g @anthropic-ai/claude-code' 来安装。".to_string())
+}
+
+/// Window state for saving/restoring window size and position
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct WindowState {
+    pub width: f64,
+    pub height: f64,
+    pub x: Option<f64>,
+    pub y: Option<f64>,
+    pub maximized: bool,
+    pub fullscreen: bool,
+}
+
+impl Default for WindowState {
+    fn default() -> Self {
+        Self {
+            width: 1200.0,
+            height: 800.0,
+            x: None,
+            y: None,
+            maximized: false,
+            fullscreen: false,
+        }
+    }
+}
+
+/// 验证窗口状态的有效性
+fn validate_window_state(state: &WindowState) -> bool {
+    // 检查窗口尺寸是否有效
+    if state.width <= 0.0 || state.height <= 0.0 {
+        log::warn!("Invalid window dimensions: {}x{}", state.width, state.height);
+        return false;
+    }
+    
+    // 检查窗口尺寸是否过小或过大
+    if state.width < 200.0 || state.height < 150.0 {
+        log::warn!("Window too small: {}x{}", state.width, state.height);
+        return false;
+    }
+    
+    if state.width > 8000.0 || state.height > 6000.0 {
+        log::warn!("Window too large: {}x{}", state.width, state.height);
+        return false;
+    }
+    
+    // 检查窗口位置是否在合理范围内
+    if let (Some(x), Some(y)) = (state.x, state.y) {
+        // Windows 最小化时位置通常为 -32000
+        if x <= -10000.0 || y <= -10000.0 {
+            log::warn!("Invalid window position: ({}, {})", x, y);
+            return false;
+        }
+        
+        // 检查位置是否过于极端 (允许负值但不能太极端)
+        if x < -1000.0 || y < -1000.0 || x > 10000.0 || y > 10000.0 {
+            log::warn!("Window position out of reasonable range: ({}, {})", x, y);
+            return false;
+        }
+    }
+    
+    true
+}
+
+/// Save the current window state to file
+#[tauri::command]
+pub async fn save_window_state(
+    window: tauri::WebviewWindow,
+) -> Result<(), String> {
+    let claude_dir = get_claude_dir().map_err(|e| e.to_string())?;
+    let window_state_file = claude_dir.join("window_state.json");
+    
+    // Get current window state - 使用逻辑尺寸确保与恢复时一致
+    let size = window.inner_size().map_err(|e| e.to_string())?;
+    let logical_size = size.to_logical::<f64>(window.scale_factor().map_err(|e| e.to_string())?);
+    let position = window.outer_position().map_err(|e| e.to_string())?;
+    let logical_position = position.to_logical::<f64>(window.scale_factor().map_err(|e| e.to_string())?);
+    let is_maximized = window.is_maximized().map_err(|e| e.to_string())?;
+    let is_fullscreen = window.is_fullscreen().map_err(|e| e.to_string())?;
+    let is_minimized = window.is_minimized().map_err(|e| e.to_string())?;
+    
+    // 验证窗口状态有效性 - 不保存无效状态
+    if is_minimized {
+        log::info!("Window is minimized, skipping save to avoid invalid state");
+        return Ok(());
+    }
+    
+    // 检查窗口尺寸是否有效
+    if logical_size.width <= 0.0 || logical_size.height <= 0.0 {
+        log::warn!("Window has invalid logical size ({}x{}), skipping save", logical_size.width, logical_size.height);
+        return Ok(());
+    }
+    
+    // 检查窗口位置是否在合理范围内 (Windows 最小化时位置为 -32000)
+    if logical_position.x <= -10000.0 || logical_position.y <= -10000.0 {
+        log::warn!("Window position is invalid ({}, {}), skipping save", logical_position.x, logical_position.y);
+        return Ok(());
+    }
+    
+    let window_state = WindowState {
+        width: logical_size.width,
+        height: logical_size.height,
+        x: Some(logical_position.x),
+        y: Some(logical_position.y),
+        maximized: is_maximized,
+        fullscreen: is_fullscreen,
+    };
+    
+    let json = serde_json::to_string_pretty(&window_state)
+        .map_err(|e| format!("Failed to serialize window state: {}", e))?;
+    
+    fs::write(&window_state_file, json)
+        .map_err(|e| format!("Failed to write window state file: {}", e))?;
+    
+    log::info!("Window state saved: {:?}", window_state);
+    Ok(())
+}
+
+/// Load and restore the window state from file
+#[tauri::command]
+pub async fn load_window_state() -> Result<WindowState, String> {
+    let claude_dir = get_claude_dir().map_err(|e| e.to_string())?;
+    let window_state_file = claude_dir.join("window_state.json");
+    
+    if !window_state_file.exists() {
+        log::info!("Window state file does not exist, using defaults");
+        return Ok(WindowState::default());
+    }
+    
+    let content = fs::read_to_string(&window_state_file)
+        .map_err(|e| format!("Failed to read window state file: {}", e))?;
+    
+    let mut window_state: WindowState = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse window state: {}", e))?;
+    
+    // 验证加载的窗口状态有效性
+    let is_valid = validate_window_state(&window_state);
+    
+    if !is_valid {
+        log::warn!("Loaded window state is invalid, using defaults: {:?}", window_state);
+        window_state = WindowState::default();
+    }
+    
+    log::info!("Window state loaded: {:?}", window_state);
+    Ok(window_state)
+}
+
+/// Apply the window state to the current window
+#[tauri::command]
+pub async fn apply_window_state(
+    window: tauri::WebviewWindow,
+    state: WindowState,
+) -> Result<(), String> {
+    // Set size first
+    let logical_size = tauri::LogicalSize::new(state.width, state.height);
+    window.set_size(logical_size).map_err(|e| e.to_string())?;
+    
+    // Set position if available
+    if let (Some(x), Some(y)) = (state.x, state.y) {
+        let logical_position = tauri::LogicalPosition::new(x, y);
+        window.set_position(logical_position).map_err(|e| e.to_string())?;
+    }
+    
+    // Apply maximized/fullscreen state
+    if state.fullscreen {
+        window.set_fullscreen(true).map_err(|e| e.to_string())?;
+    } else if state.maximized {
+        window.maximize().map_err(|e| e.to_string())?;
+    }
+    
+    // 显示窗口 - 在所有状态应用完成后
+    window.show().map_err(|e| e.to_string())?;
+    
+    log::info!("Window state applied successfully and window is now visible");
+    Ok(())
+}
+

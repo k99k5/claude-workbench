@@ -1,10 +1,10 @@
 # Claude Workbench
 
-> 专为 Windows 用户设计的 Claude CLI 桌面管理工具
+> 专业的 Claude CLI 桌面管理工具，支持多平台
 
 [![Release](https://img.shields.io/github/v/release/anyme123/claude-workbench?color=brightgreen)](https://github.com/anyme123/claude-workbench/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows-blue)](https://github.com/anyme123/claude-workbench)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](https://github.com/anyme123/claude-workbench)
 
 ## ✨ 特性
 

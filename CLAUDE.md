@@ -4,304 +4,240 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Claude Workbench is a comprehensive desktop GUI application for Claude CLI, built specifically for Windows with Tauri (Rust backend) and React TypeScript frontend. It provides an intuitive interface for AI-powered development workflows, project management, session handling, and MCP (Model Context Protocol) server management.
+Claude Workbench is a comprehensive desktop GUI application for Claude CLI, built with Tauri 2 (Rust backend) and React 18 TypeScript frontend. This is a Windows-optimized fork based on [@getAsterisk/claudia](https://github.com/getAsterisk/claudia) with specialized Windows desktop integration.
 
-The application focuses on core Claude CLI integration optimized for Windows users, providing a streamlined experience for developers working with AI assistance on Windows platforms.
+**Core Features:**
+- **Provider Management**: Silent API provider switching with local configuration storage - the primary differentiating feature
+- **Claude CLI Integration**: Complete process management with session handling and streaming output  
+- **MCP Support**: Full Model Context Protocol server lifecycle management
+- **Agent System**: GitHub-integrated agent execution with monitoring
+- **Project Management**: Session history, checkpoints, and timeline navigation
 
-## Core Architecture
-
-### Frontend (React/TypeScript)
-- **Main App**: Multi-view application managing projects, sessions, agents, and settings
-- **Core Components**: 
-  - `FloatingPromptInput`: Central input interface with clipboard image support and thinking modes
-  - `ClaudeCodeSession`: Real-time Claude interaction interface with session resumption and checkpoint management
-  - `CCAgents`: Agent creation and management system with GitHub integration
-  - `MCPManager`: MCP server configuration, testing, and project-specific management
-  - `Settings`: Multi-tab configuration UI with theme switching, hooks, storage, and advanced settings
-  - `HooksEditor`: Advanced shell command hooks for tool events with regex matching and templates
-  - `StorageTab`: SQLite database viewer/editor for agent data and session history
-  - `LanguageSelector`: Multi-language support with Chinese-first localization
-  - `ClaudeStatusIndicator`: Real-time status monitoring for Claude processes
-
-### Frontend Architecture
-- **Context Management**: 
-  - `ThemeContext`: OKLCH color space-based theme system with localStorage persistence
-- **Custom Hooks**: 
-  - `useTranslation`: Chinese-first internationalization with fallback support
-- **State Management**: React Context providers for theme, output caching, and i18n
-- **API Layer**: Type-safe Tauri invoke-based communication (`src/lib/api.ts`) with comprehensive error handling
-
-### Backend (Rust/Tauri)
-- **Commands Architecture**: Modular command handlers in `src-tauri/src/commands/`
-  - `claude.rs`: Core Claude CLI integration with process lifecycle management and project hiding/restoration
-  - `agents.rs`: Agent execution with GitHub integration and process monitoring
-  - `mcp.rs`: MCP server lifecycle, configuration, and health monitoring
-  - `clipboard.rs`: Clipboard image handling with temporary file management
-  - `storage.rs`: SQLite database operations with query optimization
-  - `slash_commands.rs`: Custom slash command system with autocomplete
-  - `usage.rs`: Usage statistics and metrics tracking
-
-## Data Flow Architecture
-
-1. **Frontend → Backend**: Type-safe Tauri `invoke()` with comprehensive error handling
-2. **Backend → CLI**: Process spawning with streaming output capture and health monitoring
-3. **Database**: SQLite with automatic migrations and query optimization
-4. **File System**: Scoped access with security policies (`$HOME/**`, `$TEMP/**`, `$TMP/**`)
-5. **Image Pipeline**: Clipboard → Base64 → Temp files → Claude CLI paths with UNC path handling
-6. **Project Management**: Hidden projects list stored in `~/.claude/hidden_projects.json`
+**Primary Platform**: Windows (专版优化) with cross-platform GitHub Actions builds for macOS/Linux.
 
 ## Development Commands
 
-### Frontend Development
+### Essential Commands
 ```bash
-# Start development server (Vite)
-bun run dev        # Preferred
-npm run dev        # Alternative
+# Development server (frontend + backend hot reload)
+bun run tauri dev
 
-# Build frontend only
-bun run build      # Preferred
-npm run build      # Alternative
-
-# Type checking
+# Type checking (CRITICAL for TypeScript safety) 
 npx tsc --noEmit
 
-# Preview built frontend
-npm run preview
+# Production build (ALWAYS required for testing)
+bun run tauri build
+
+# Fast development build (iteration testing)  
+bun run tauri build -- --profile dev-release
+
+# Rust backend only
+cd src-tauri && cargo build --release
+cd src-tauri && cargo check && cargo clippy
 ```
 
-### Tauri Development
+### Build Profiles
+- **Development**: `tauri dev` - Hot reload, debug symbols
+- **Fast Build**: `tauri build -- --profile dev-release` - Uses `dev-release` profile with opt-level=2, thin LTO
+- **Production**: `tauri build` - Full optimization with opt-level="z", full LTO, strip symbols
+
+### Prerequisites
+- **Bun** (recommended) - Required for cross-platform builds  
+- **Rust 2021+** with Tauri CLI
+- **Node.js 18+**
+- **Windows**: Microsoft C++ Build Tools, WebView2
+
+## Core Architecture
+
+### System Architecture
+The application follows a multi-layered architecture with clear separation between frontend, IPC bridge, and backend:
+
+```
+Frontend (React 18 + TypeScript)
+├── App.tsx - Main application router and state
+├── components/ - 40+ specialized components  
+│   ├── ClaudeCodeSession.tsx - Core Claude interaction (CRITICAL: uses INLINE listeners)
+│   ├── FloatingPromptInput.tsx - Universal prompt interface with thinking modes
+│   ├── ProviderManager.tsx - API provider CRUD interface (core feature)
+│   ├── Settings.tsx - Multi-tab configuration interface
+│   ├── DeletedProjects.tsx - Project recovery and permanent deletion interface
+│   └── AgentExecution.tsx - Agent execution monitoring
+├── lib/
+│   ├── api.ts - Type-safe Tauri invoke interface (236 commands)
+│   └── utils.ts - General utilities
+└── hooks/ - Custom React hooks and i18n
+
+Backend (Rust + Tauri 2)  
+├── main.rs - Application entry, command registration (236 commands)
+├── commands/ - Modular command handlers
+│   ├── claude.rs - Claude CLI integration, process lifecycle (CRITICAL)
+│   ├── provider.rs - API provider configuration management (core feature)
+│   ├── mcp.rs - MCP server lifecycle management
+│   ├── agents.rs - Agent execution with GitHub integration
+│   └── storage.rs - SQLite database operations  
+└── process/ - Process registry and lifecycle management
+```
+
+### Event System Architecture (CRITICAL)
+The application uses a sophisticated event listener pattern that must be understood for debugging:
+
+**ClaudeCodeSession.tsx** - Uses INLINE event listeners with generic→specific switching:
+1. **Generic listeners** capture initialization messages across all sessions
+2. **Session-specific listeners** provide isolation once session ID is detected
+3. **Cleanup pattern** prevents memory leaks with proper unlisten management
+
+### Data Storage Structure
+```
+~/.claude/
+├── projects/[project-id]/[session-id].jsonl  # Session message history
+├── providers.json                            # API provider configurations (CORE)
+├── settings.json                             # User preferences
+├── window_state.json                         # Window size/position memory
+└── hidden_projects.json                      # Deleted projects list for recovery system
+```
+
+## Critical Implementation Details
+
+### Provider Management System (Core Feature)
+The provider management system is the primary differentiating feature of this Windows fork:
+
+**Backend Implementation** (`src-tauri/src/commands/provider.rs`):
+- `get_provider_presets()` - Lists all configured API providers
+- `add_provider_config()`, `update_provider_config()` - CRUD operations
+- Stores configurations in `~/.claude/providers.json` for security
+- Automatic Claude process restart when provider is switched
+
+**Frontend Implementation** (`src/components/ProviderManager.tsx`):
+- Complete CRUD interface for provider management
+- Silent switching without interrupting user workflow
+- Real-time status display of active provider
+
+### Project Recovery System (NEW)
+Comprehensive deleted projects management with intelligent format handling:
+
+**Backend Implementation** (`src-tauri/src/commands/claude.rs`):
+- `list_hidden_projects()` - Lists deleted projects with directory validation
+- `restore_project()` - Restores deleted projects from hidden list
+- `delete_project_permanently()` - Permanent deletion with intelligent format detection
+- Handles both legacy (double-dash) and standard (single-dash) project encoding formats
+
+**Frontend Implementation** (`src/components/DeletedProjects.tsx`):
+- Complete recovery interface accessible via Settings → "已删除" tab
+- Format indicators showing legacy vs standard project formats
+- Batch operations for restoration and permanent deletion
+- Intelligent path decoding for both encoding schemes
+
+### Claude CLI Integration Pattern
+**Process Management** (`src-tauri/src/commands/claude.rs`):
+- `execute_claude_code()` - Start new Claude session
+- `continue_claude_code()` - Continue existing session with `-c` flag
+- `resume_claude_code()` - Resume from saved session state
+
+**Project Path Encoding** (CRITICAL for duplicate prevention):
+```rust
+// Consistent single-dash encoding to match Claude CLI
+fn encode_project_path(path: &str) -> String {
+    path.replace("\\", "-")
+        .replace("/", "-")
+        .replace(":", "")
+}
+```
+
+**Slash Command Handling**:
+```rust
+// For slash commands like /compact, /clear
+let args = if prompt.trim().starts_with('/') {
+    vec!["--prompt".to_string(), escaped_prompt, /* ... */]
+} else {
+    vec![escaped_prompt, /* ... */]
+};
+```
+
+### Event Listener Debugging Pattern
+When debugging Claude session issues, focus on these areas:
+
+1. **Generic Listener Setup**: Check browser console for `claude-output` listener setup
+2. **Session ID Detection**: Verify extraction from `system.init` messages  
+3. **Specific Listener Switch**: Confirm transition to `claude-output:${sessionId}` listeners
+4. **Cleanup Verification**: Ensure proper unlisten on component unmount
+
+**Key Files for Debugging**:
+- `ClaudeCodeSession.tsx:522-650` - Event listener implementation
+- Browser DevTools Console - Real-time event flow
+
+## Common Issues & Solutions
+
+### Build Issues
+**Symptom**: "页面文件太小，无法完成操作" (Windows)
+**Solution**:
 ```bash
-# Start Tauri development (includes frontend auto-rebuild)
-npm run tauri dev
-
-# Build complete release application (REQUIRED for cross-device compatibility)
-npm run tauri build
-
-# Build Rust backend only (debug)
-cd src-tauri && cargo build
-
-# Build Rust backend only (release with optimizations)
-cd src-tauri && cargo build --release --features custom-protocol
-
-# Run Rust tests
-cd src-tauri && cargo test
-
-# Check Rust code formatting
-cd src-tauri && cargo fmt --check
-
-# Run Rust linter
-cd src-tauri && cargo clippy
+rustup update
+cargo clean  
+# Always use production build: bun run tauri build (not dev mode)
 ```
 
-### Critical Build Requirements
-- **ALWAYS use `npm run tauri build` for production/testing** - ensures cross-device compatibility
-- **Bun is required for release builds** - npm builds may cause compatibility issues on other devices
-- **Release builds use aggressive optimizations** - opt-level="z", LTO, strip symbols
+### Event Listener Problems (PRIMARY)
+**Symptom**: New Claude projects don't receive CLI output
+**Debug Steps**:
+1. Check browser console for listener setup logs
+2. Verify session ID detection in generic listeners  
+3. Confirm switch to session-specific listeners
+4. Check `~/.claude/projects/` directory structure
 
-### Key Build Outputs
-- Executable: `src-tauri/target/release/claude-workbench.exe`
-- MSI Installer: `src-tauri/target/release/bundle/msi/Claude Workbench_1.0.0_x64_en-US.msi`
-- NSIS Installer: `src-tauri/target/release/bundle/nsis/Claude Workbench_1.0.0_x64-setup.exe`
+### Provider Configuration Issues  
+**Symptom**: Provider switching doesn't take effect
+**Debug**:
+```bash
+# Check configuration
+cat ~/.claude/providers.json
 
-## Architecture Patterns
-
-### Frontend-Backend Communication
-All communication uses Tauri's type-safe `invoke()` pattern:
-```typescript
-// Frontend with error handling
-const result = await invoke<ReturnType>('command_name', { param: value });
-
-// Backend with Result pattern
-#[command]
-async fn command_name(param: Type) -> Result<ReturnType, String>
+# Verify environment variables in process
+# Check Claude process restart in Task Manager
 ```
 
-### State Management
-- **Global State**: React Context providers with TypeScript integration
-- **Local State**: Component-specific state with hooks
-- **Persistent State**: SQLite database with automatic migrations
-- **Theme State**: OKLCH color space with localStorage persistence
+### Duplicate Projects Issue ✅ (RESOLVED)
+**Previous Problem**: claude-workbench created duplicate projects due to encoding mismatch
+- Native Claude CLI: `C--Users-Administrator-Desktop-test1` (single dash)
+- claude-workbench: `C--Users--Administrator--Desktop--test1` (double dash)
 
-### Error Handling Strategy
-- **Rust Backend**: Comprehensive `Result<T, String>` pattern with detailed error messages
-- **Frontend**: Type-safe error handling with user-friendly alerts
-- **Process Management**: Graceful cleanup and recovery mechanisms
+**Solution**: Implemented `encode_project_path()` function using single-dash encoding to match Claude CLI exactly. Removed redundant manual project creation code that was duplicating Claude CLI's automatic project creation.
 
-### Project Management System
-- **Project Listing**: Dynamic scanning of `~/.claude/projects` directory
-- **Project Hiding**: Non-destructive removal from project list using `hidden_projects.json`
-- **Project Restoration**: Ability to restore hidden projects back to the list
-- **File Preservation**: All project files and sessions are preserved when "deleting" projects
+### Project Recovery System Issues
+**Symptom**: Correct format projects don't appear in deleted list
+**Solution**: Enhanced `list_hidden_projects()` with directory validation and intelligent format matching for both single-dash and double-dash encoded project IDs.
 
-## Theme System
+**Symptom**: Permanent deletion fails on manually deleted directories  
+**Solution**: Added intelligent directory detection in `delete_project_permanently()` that handles missing directories gracefully.
 
-### OKLCH Color Space Implementation
-```css
-/* Enhanced theme with OKLCH color space for better perception */
-:root, .dark {
-  --color-background: oklch(0.12 0.01 240);
-  --color-foreground: oklch(0.98 0.01 240);
-  --color-muted-foreground: oklch(0.68 0.01 240);
-}
-
-.light {
-  --color-background: oklch(0.99 0.005 240);
-  --color-foreground: oklch(0.08 0.01 240);
-  --color-muted-foreground: oklch(0.45 0.01 240);
-}
-```
-
-### Theme Features
-- **Dual Theme Support**: Light and dark themes with instant switching
-- **Enhanced Contrast**: Improved readability in light theme with optimized contrast ratios
-- **Backdrop Effects**: Advanced backdrop-blur with proper transparency handling
-- **Chinese Font Support**: Comprehensive Chinese font stack with fallbacks
-- **Accessibility**: WCAG-compliant contrast ratios (4.5:1 minimum)
-
-## Internationalization
-
-### Chinese-First Strategy
-- **Primary Language**: Chinese (zh) with comprehensive UI translation
-- **Fallback Strategy**: Chinese → English for all missing translations
-- **Detection Order**: localStorage → navigator → htmlTag
-- **Implementation**: Direct Chinese text in components for better performance
-- **Resources**: Comprehensive translation files in `src/i18n/locales/`
-
-### Localization Implementation
-```typescript
-// i18n configuration
-fallbackLng: 'zh',
-lng: 'zh',
-detection: {
-  order: ['localStorage', 'navigator', 'htmlTag'],
-  caches: ['localStorage'],
-}
-```
-
-## Dependencies and Technology Stack
-
-### Frontend Stack
-- **React 18.3.1**: Latest React with concurrent features
-- **TypeScript 5.6.2**: Enhanced type safety and modern features
-- **Tailwind CSS 4.1.8**: Latest utility-first CSS framework
-- **Tauri 2.1.1**: Modern Rust-based desktop framework
-- **Framer Motion**: Smooth animations and transitions
-- **Radix UI**: Accessible component primitives
-- **i18next**: Comprehensive internationalization
-
-### Backend Stack
-- **Rust 2021 Edition**: Modern Rust with async/await throughout
-- **Tauri 2.x**: Desktop framework with comprehensive plugin system
-- **SQLite (Rusqlite)**: Embedded database with bundled support
-- **Tokio**: Async runtime for concurrent operations
-- **Regex**: Pattern matching for hooks and content processing
-- **Chrono**: Date and time handling with serialization
-
-### Build and Development
-- **Bun**: Primary package manager (REQUIRED for cross-device compatibility)
-- **Vite 6.0.3**: Fast development server and build tool with code splitting
-- **Cargo**: Rust package manager with release optimizations
-- **TypeScript Compiler**: Strict type checking and compilation
-
-## Security Configuration
-
-### Tauri Security Policies
-```json
-{
-  "security": {
-    "csp": "default-src 'self'; img-src 'self' asset: https://asset.localhost blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-eval'",
-    "assetProtocol": {
-      "enable": true,
-      "scope": ["**"]
-    }
-  }
-}
-```
-
-### Filesystem Access
-- **Allowed Scopes**: `$HOME/**`, `$TEMP/**`, `$TMP/**`
-- **Permitted Operations**: readFile, writeFile, readDir, copyFile, createDir, removeDir, removeFile, renameFile, exists
-- **Image Handling**: Temporary file storage with automatic cleanup
+### Window State Management ✅
+**功能**: 应用程序会记住关闭前的窗口大小和位置，下次启动时自动恢复
+**安全机制**: 
+- 自动验证窗口状态有效性，防止窗口不可见
+- 过滤最小化、无效尺寸或极端位置的状态
+- 加载时验证，如无效则使用默认值
+**配置文件**: `~/.claude/window_state.json`
 
 ## Performance Optimizations
 
-### Memory Management
-- **Frontend Circular Buffering**: Prevents memory leaks in streaming operations
-- **Backend Resource Cleanup**: Automatic cleanup of processes and temporary files
-- **Database Optimization**: Efficient queries with proper indexing
-- **Image Processing**: Optimized clipboard handling with temporary storage
+### Build Profiles
+- **Development**: Full debug info, incremental compilation
+- **Fast Build** (`dev-release`): opt-level=2, thin LTO, parallel codegen  
+- **Production**: opt-level="z", full LTO, strip symbols, panic=abort
 
-### Build Optimizations
-- **Code Splitting**: Manual chunks for vendor libraries and features
-- **Rust Release Optimization**: Aggressive size optimization with LTO and symbol stripping
-- **Chunk Size Management**: 2MB warning limit with strategic code splitting
+### Frontend Performance
+- **Virtual Scrolling**: @tanstack/react-virtual for large message lists
+- **Event Cleanup**: Proper unlisten patterns prevent memory leaks
+- **Message Filtering**: Smart filtering reduces DOM elements
+- **Database Pagination**: Efficient queries for large datasets
 
-## Testing Strategy
+## Windows-Specific Optimizations
 
-### UI Testing Framework
-Comprehensive testing strategy documented in `TESTING_GUIDE.md`:
+This fork includes Windows-specific optimizations:
+- **Process Creation**: Optimized Windows process spawning for Claude CLI
+- **Path Handling**: Windows long path support with `\\?\` prefix handling  
+- **Environment Integration**: Native Windows environment variable handling
+- **Build Targets**: MSI and NSIS installers optimized for Windows deployment
 
-1. **Theme Testing**: Both light and dark themes across all components
-2. **Layout Testing**: Responsive design across desktop, tablet, and mobile
-3. **Interaction Testing**: All user interactions and edge cases
-4. **Performance Testing**: Memory usage, scrolling performance, and response times
-5. **Cross-browser Testing**: Chrome 88+, Firefox 113+, Safari 15.4+, Edge 88+
-
-## Development Workflow
-
-### Critical Development Practices
-1. **Always use `npm run tauri build` for testing** - Development mode can mask compatibility issues
-2. **Bun is required for release builds** - Ensures cross-device compatibility
-3. **Test in both themes** - Light and dark theme compatibility is essential
-4. **Memory leak prevention** - Monitor frontend memory usage during development
-
-### File Structure Patterns
-- **Commands**: Each feature has its own command module in `src-tauri/src/commands/`
-- **Components**: Organized by feature with comprehensive TypeScript types
-- **Contexts**: Global state management with React Context
-- **Hooks**: Custom hooks for complex state logic
-- **Types**: Comprehensive type definitions for all interfaces
-
-## Important Notes
-
-### Recent Major Changes
-- **Session Pool Removal**: All session pool functionality has been completely removed as it was deemed redundant
-- **WSL Support Removal**: WSL integration has been completely removed to simplify the codebase
-- **Project Management**: "Delete" project now means hiding from list while preserving all files
-- **Application Rebranding**: Renamed from "Claudia" to "Claude Workbench"
-
-### Cross-Platform Compatibility
-- **Windows-specific optimizations**: Process handling and file path management
-- **Path Handling**: Proper handling of different OS path separators
-- **UNC Path Support**: Automatic stripping of Windows UNC prefixes
-
-### Deployment Considerations
-- **Installer Generation**: Both MSI and NSIS installers are generated
-- **Security Scanning**: CSP policies and filesystem restrictions
-- **Version Management**: Automatic version handling in build process
-
-### Known Limitations
-- **OKLCH Color Space**: Requires modern browser support (Chrome 88+, Firefox 113+)
-- **Backdrop Filter**: Browser support required for advanced transparency effects
-
-## Troubleshooting
-
-### Common Issues
-1. **Build Compatibility Issues**: Always use `npm run tauri build` with bun for cross-device compatibility
-2. **Theme Switching Problems**: Verify ThemeContext is properly wrapped around components
-3. **Font Rendering**: Ensure Chinese fonts are properly loaded in CSS
-4. **Multiline Content Send Failures**: Fixed in `claude.rs` with proper command line escaping
-
-### Debug Commands
-```bash
-# Check compilation
-cd src-tauri && cargo check
-
-# Monitor memory usage in development
-# Check for memory leaks in browser dev tools
-
-# Theme debugging
-# Verify CSS custom properties are applied correctly in browser inspector
-```
-
-This documentation reflects the current simplified state of the project with recent major cleanups including session pool removal, WSL removal, and project management improvements. The application now focuses on core Claude CLI integration with a streamlined, maintainable architecture.
+**Configuration Files**:
+- **Tauri** (`tauri.conf.json`): CSP with asset protocol, Windows bundle targets
+- **TypeScript** (`tsconfig.json`): ES2020 strict mode, path mapping `@/*` → `./src/*`

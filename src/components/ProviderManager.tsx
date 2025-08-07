@@ -37,6 +37,10 @@ export default function ProviderManager({ onBack }: ProviderManagerProps) {
   const [showForm, setShowForm] = useState(false);
   const [editingProvider, setEditingProvider] = useState<ProviderConfig | null>(null);
   const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  
+  // Delete confirmation dialog state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [providerToDelete, setProviderToDelete] = useState<ProviderConfig | null>(null);
 
   useEffect(() => {
     loadData();
@@ -110,22 +114,32 @@ export default function ProviderManager({ onBack }: ProviderManagerProps) {
     setShowForm(true);
   };
 
-  const handleDeleteProvider = async (config: ProviderConfig) => {
-    if (!confirm(`确定要删除代理商 "${config.name}" 吗？`)) {
-      return;
-    }
+  const handleDeleteProvider = (config: ProviderConfig) => {
+    setProviderToDelete(config);
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDeleteProvider = async () => {
+    if (!providerToDelete) return;
     
     try {
-      setDeleting(config.id);
-      await api.deleteProviderConfig(config.id);
+      setDeleting(providerToDelete.id);
+      await api.deleteProviderConfig(providerToDelete.id);
       setToastMessage({ message: '代理商删除成功', type: 'success' });
       await loadData();
+      setDeleteDialogOpen(false);
+      setProviderToDelete(null);
     } catch (error) {
       console.error('Failed to delete provider:', error);
       setToastMessage({ message: '删除代理商失败', type: 'error' });
     } finally {
       setDeleting(null);
     }
+  };
+
+  const cancelDeleteProvider = () => {
+    setDeleteDialogOpen(false);
+    setProviderToDelete(null);
   };
 
   const handleFormSubmit = async (formData: Omit<ProviderConfig, 'id'>) => {
@@ -437,6 +451,44 @@ export default function ProviderManager({ onBack }: ProviderManagerProps) {
             onSubmit={handleFormSubmit}
             onCancel={handleFormCancel}
           />
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>确认删除代理商</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <p>您确定要删除代理商 "{providerToDelete?.name}" 吗？</p>
+            {providerToDelete && (
+              <div className="p-3 bg-muted rounded-md">
+                <p className="text-sm"><span className="font-medium">名称：</span>{providerToDelete.name}</p>
+                <p className="text-sm"><span className="font-medium">描述：</span>{providerToDelete.description}</p>
+                <p className="text-sm"><span className="font-medium">API地址：</span>{providerToDelete.base_url}</p>
+              </div>
+            )}
+            <p className="text-sm text-muted-foreground">
+              此操作无法撤销，代理商配置将被永久删除。
+            </p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={cancelDeleteProvider}
+              disabled={deleting === providerToDelete?.id}
+            >
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDeleteProvider}
+              disabled={deleting === providerToDelete?.id}
+            >
+              {deleting === providerToDelete?.id ? '删除中...' : '确认删除'}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 

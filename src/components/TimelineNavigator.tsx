@@ -250,8 +250,8 @@ export const TimelineNavigator: React.FC<TimelineNavigatorProps> = ({
           {/* Checkpoint card */}
           <Card 
             className={cn(
-              "flex-1 cursor-pointer transition-all hover:shadow-md",
-              isCurrent && "border-primary ring-2 ring-primary/20",
+              "flex-1 cursor-pointer transition-all hover:shadow-md bg-card/80 backdrop-blur-sm",
+              isCurrent && "border-primary ring-2 ring-primary/20 bg-primary/5",
               isSelected && "border-blue-500 bg-blue-500/5",
               !hasChildren && "ml-5"
             )}
@@ -377,7 +377,7 @@ export const TimelineNavigator: React.FC<TimelineNavigatorProps> = ({
   };
 
   return (
-    <div className={cn("space-y-4", className)}>
+    <div className={cn("space-y-4 bg-background/95 backdrop-blur-sm rounded-lg border p-4", className)}>
       {/* Experimental Feature Warning */}
       <div className="rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-3">
         <div className="flex items-start gap-2">
@@ -424,18 +424,18 @@ export const TimelineNavigator: React.FC<TimelineNavigatorProps> = ({
       
       {/* Timeline tree */}
       {timeline?.rootNode ? (
-        <div className="relative overflow-x-auto">
+        <div className="relative overflow-x-auto bg-muted/20 rounded-lg p-4 border">
           {renderTimelineNode(timeline.rootNode)}
         </div>
       ) : (
-        <div className="text-center py-8 text-sm text-muted-foreground">
+        <div className="text-center py-8 text-sm text-muted-foreground bg-muted/20 rounded-lg border">
           {isLoading ? t('common.loadingTimeline') : t('common.noCheckpointsYet')}
         </div>
       )}
       
       {/* Create checkpoint dialog */}
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent>
+        <DialogContent className="bg-background/95 backdrop-blur-sm">
           <DialogHeader>
             <DialogTitle>创建检查点</DialogTitle>
             <DialogDescription>
@@ -480,7 +480,7 @@ export const TimelineNavigator: React.FC<TimelineNavigatorProps> = ({
       
       {/* Diff dialog */}
       <Dialog open={showDiffDialog} onOpenChange={setShowDiffDialog}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-3xl bg-background/95 backdrop-blur-sm">
           <DialogHeader>
             <DialogTitle>检查点比较</DialogTitle>
             <DialogDescription>
