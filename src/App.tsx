@@ -391,7 +391,7 @@ function App() {
       case "settings":
         return (
           <div className="flex-1 flex flex-col" style={{ minHeight: 0 }}>
-            <Settings onBack={() => handleViewChange("welcome")} onProjectsChanged={loadProjects} />
+            <Settings onBack={() => handleViewChange("welcome")} />
           </div>
         );
       
@@ -493,6 +493,7 @@ function App() {
                           onProjectClick={handleProjectClick}
                           onProjectSettings={handleProjectSettings}
                           onProjectDelete={handleProjectDelete}
+                          onProjectsChanged={loadProjects}
                           loading={loading}
                           className="animate-fade-in"
                         />

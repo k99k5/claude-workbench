@@ -29,7 +29,6 @@ import { LanguageSelector } from "./LanguageSelector";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useTheme } from "@/contexts/ThemeContext";
 import ProviderManager from "./ProviderManager";
-import { DeletedProjects } from "./DeletedProjects";
 
 interface SettingsProps {
   /**
@@ -40,10 +39,6 @@ interface SettingsProps {
    * Optional className for styling
    */
   className?: string;
-  /**
-   * Callback when projects are restored
-   */
-  onProjectsChanged?: () => void;
 }
 
 interface PermissionRule {
@@ -67,7 +62,6 @@ interface EnvironmentVariable {
 export const Settings: React.FC<SettingsProps> = ({
   onBack,
   className,
-  onProjectsChanged,
 }) => {
   const { t } = useTranslation();
   const { theme, setTheme } = useTheme();
@@ -452,7 +446,6 @@ export const Settings: React.FC<SettingsProps> = ({
               <TabsTrigger value="commands">命令</TabsTrigger>
               <TabsTrigger value="provider">代理商</TabsTrigger>
               <TabsTrigger value="storage">{t('settings.storage')}</TabsTrigger>
-              <TabsTrigger value="deleted">已删除</TabsTrigger>
             </TabsList>
             
             {/* General Settings */}
@@ -956,10 +949,6 @@ export const Settings: React.FC<SettingsProps> = ({
               <StorageTab />
             </TabsContent>
             
-            {/* Deleted Projects Tab */}
-            <TabsContent value="deleted">
-              <DeletedProjects onProjectRestored={onProjectsChanged} />
-            </TabsContent>
           </Tabs>
         </div>
       )}

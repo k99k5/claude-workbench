@@ -7,7 +7,8 @@ import {
   ChevronRight, 
   Settings,
   MoreVertical,
-  Trash2
+  Trash2,
+  Archive
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -31,6 +32,8 @@ import type { Project } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { formatTimeAgo } from "@/lib/date-utils";
 import { Pagination } from "@/components/ui/pagination";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { DeletedProjects } from "./DeletedProjects";
 
 interface ProjectListProps {
   /**
@@ -49,6 +52,10 @@ interface ProjectListProps {
    * Callback when a project is deleted
    */
   onProjectDelete?: (project: Project) => Promise<void>;
+  /**
+   * Callback when projects are changed (for refresh)
+   */
+  onProjectsChanged?: () => void;
   /**
    * Whether the list is currently loading
    */
@@ -93,12 +100,14 @@ export const ProjectList: React.FC<ProjectListProps> = ({
   onProjectClick,
   onProjectSettings,
   onProjectDelete,
+  onProjectsChanged,
   className,
 }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [activeTab, setActiveTab] = useState("active");
   
   // Calculate pagination
   const totalPages = Math.ceil(projects.length / ITEMS_PER_PAGE);
@@ -136,8 +145,8 @@ export const ProjectList: React.FC<ProjectListProps> = ({
     setProjectToDelete(null);
   };
   
-  return (
-    <div className={cn("space-y-4", className)}>
+  const ProjectGrid = () => (
+    <div className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {currentProjects.map((project, index) => (
           <motion.div
@@ -239,6 +248,31 @@ export const ProjectList: React.FC<ProjectListProps> = ({
         totalPages={totalPages}
         onPageChange={setCurrentPage}
       />
+    </div>
+  );
+
+  return (
+    <div className={cn("space-y-4", className)}>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="active" className="flex items-center gap-2">
+            <FolderOpen className="h-4 w-4" />
+            活跃项目
+          </TabsTrigger>
+          <TabsTrigger value="deleted" className="flex items-center gap-2">
+            <Archive className="h-4 w-4" />
+            已删除项目
+          </TabsTrigger>
+        </TabsList>
+        
+        <TabsContent value="active" className="mt-6">
+          <ProjectGrid />
+        </TabsContent>
+        
+        <TabsContent value="deleted" className="mt-6">
+          <DeletedProjects onProjectRestored={onProjectsChanged} />
+        </TabsContent>
+      </Tabs>
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
