@@ -18,6 +18,7 @@ pub struct RouterProcessManager {
     /// HTTP代理客户端
     proxy_client: Option<RouterProxyClient>,
     /// 健康状态通道
+    #[allow(dead_code)]
     health_tx: mpsc::Sender<HealthStatus>,
     #[allow(dead_code)]
     health_rx: Arc<RwLock<mpsc::Receiver<HealthStatus>>>,
@@ -204,6 +205,7 @@ impl RouterProcessManager {
     }
     
     /// 检测Node.js路径
+    #[allow(dead_code)]
     fn detect_node_path(&self) -> RouterResult<String> {
         // 尝试多个可能的路径
         let candidates = vec![
@@ -232,6 +234,7 @@ impl RouterProcessManager {
     }
     
     /// 获取Router命令路径
+    #[allow(dead_code)]
     fn get_router_command_path(&self) -> RouterResult<String> {
         // 首先尝试全局安装的claude-code-router命令
         let global_commands = vec![
@@ -331,6 +334,7 @@ impl RouterProcessManager {
     }
     
     /// 启动健康监控
+    #[allow(dead_code)]
     async fn start_health_monitor(&self, client: RouterProxyClient) -> RouterResult<()> {
         let health_tx = self.health_tx.clone();
         let running = self.running.clone();

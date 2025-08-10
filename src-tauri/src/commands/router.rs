@@ -157,7 +157,7 @@ pub async fn router_ccr_health_check() -> Result<bool, String> {
 pub async fn router_send_model_command(
     provider_name: String,
     model_name: String,
-    session_id: Option<String>,
+    _session_id: Option<String>,
 ) -> Result<String, String> {
     let model_command = format!("/model {},{}", provider_name, model_name);
     
