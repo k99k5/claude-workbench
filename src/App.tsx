@@ -19,6 +19,7 @@ import { UsageDashboard } from "@/components/UsageDashboard";
 import { MCPManager } from "@/components/MCPManager";
 import { ClaudeBinaryDialog } from "@/components/ClaudeBinaryDialog";
 import { Toast, ToastContainer } from "@/components/ui/toast";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ProjectSettings } from '@/components/ProjectSettings';
 import { RouterDashboard } from '@/components/RouterDashboard';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -60,6 +61,8 @@ function App() {
   const [isClaudeStreaming, setIsClaudeStreaming] = useState(false);
   const [projectForSettings, setProjectForSettings] = useState<Project | null>(null);
   const [previousView, setPreviousView] = useState<View>("welcome");
+  const [showNavigationConfirm, setShowNavigationConfirm] = useState(false);
+  const [pendingView, setPendingView] = useState<View | null>(null);
 
   // 在项目视图中挂载时加载项目
   // Load projects on mount when in projects view
@@ -258,21 +261,33 @@ function App() {
    */
   const handleViewChange = (newView: View) => {
     // Check if we're navigating away from an active Claude session
-    if (view === "claude-code-session") {
-      // 如果正在streaming，显示特殊警告；否则显示通用确认
-      const message = isClaudeStreaming && activeClaudeSessionId 
-        ? t('common.claudeStillResponding')
-        : '您确定要离开Claude会话吗？这可能会丢失当前的会话上下文。';
-      
-      const shouldLeave = window.confirm(message);
-      if (shouldLeave) {
-        setView(newView);
-      }
-      // If user chooses not to leave, don't change view
+    if (view === "claude-code-session" && isClaudeStreaming && activeClaudeSessionId) {
+      // Show in-app confirmation dialog instead of system confirm
+      setPendingView(newView);
+      setShowNavigationConfirm(true);
       return;
     }
     
     setView(newView);
+  };
+
+  /**
+   * Handles navigation confirmation
+   */
+  const handleNavigationConfirm = () => {
+    if (pendingView) {
+      setView(pendingView);
+      setPendingView(null);
+    }
+    setShowNavigationConfirm(false);
+  };
+
+  /**
+   * Handles navigation cancellation
+   */
+  const handleNavigationCancel = () => {
+    setPendingView(null);
+    setShowNavigationConfirm(false);
   };
 
   /**
@@ -624,6 +639,26 @@ function App() {
             }}
             onError={(message) => setToast({ message, type: "error" })}
           />
+
+          {/* Navigation Confirmation Dialog */}
+          <Dialog open={showNavigationConfirm} onOpenChange={setShowNavigationConfirm}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>确认离开</DialogTitle>
+                <DialogDescription>
+                  Claude 正在处理您的请求。确定要离开当前会话吗？这将中断正在进行的对话。
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="outline" onClick={handleNavigationCancel}>
+                  取消
+                </Button>
+                <Button onClick={handleNavigationConfirm}>
+                  确定离开
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
           
           {/* Toast Container */}
           <ToastContainer>
