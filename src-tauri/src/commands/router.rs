@@ -45,76 +45,63 @@ pub struct CCRModel {
     pub full_name: String,
 }
 
-/// 获取CCR配置信息
+/// 从ConfigManager获取路由配置信息
 #[tauri::command]
-pub async fn router_get_ccr_config() -> Result<CCRConfigInfo, String> {
-    // 从ccr API获取配置
-    let client = reqwest::Client::new();
-    let response = client
-        .get("http://127.0.0.1:3456/api/config")
-        .send()
-        .await
-        .map_err(|e| format!("获取ccr配置失败: {}", e))?;
-
-    if !response.status().is_success() {
-        return Err("ccr服务未运行或无法访问".to_string());
-    }
-
-    let config_json: Value = response
-        .json()
-        .await
-        .map_err(|e| format!("解析配置JSON失败: {}", e))?;
-
-    // 解析Providers
-    let providers: Vec<CCRProvider> = config_json["Providers"]
-        .as_array()
-        .unwrap_or(&vec![])
-        .iter()
+pub async fn router_get_config_from_manager(state: State<'_, RouterManagerState>) -> Result<CCRConfigInfo, String> {
+    let config_manager_clone = {
+        let config_manager_guard = state.config_manager.lock().unwrap();
+        config_manager_guard.as_ref()
+            .ok_or("Router尚未初始化，请先调用router_init")?
+            .clone()
+    };
+    
+    let config_manager = config_manager_clone.read().await;
+    let config = config_manager.get_config();
+    
+    // 转换配置格式为前端所需的格式
+    let providers: Vec<CCRProvider> = config.router_data.providers.iter()
         .map(|p| CCRProvider {
-            name: p["name"].as_str().unwrap_or("").to_string(),
-            api_base_url: p["api_base_url"].as_str().unwrap_or("").to_string(),
-            models: p["models"]
-                .as_array()
-                .unwrap_or(&vec![])
-                .iter()
-                .map(|m| m.as_str().unwrap_or("").to_string())
-                .collect(),
+            name: p.name.clone(),
+            api_base_url: p.api_base_url.clone(),
+            models: p.models.clone(),
         })
         .collect();
-
-    // 解析Router规则
-    let router_config = &config_json["Router"];
+    
     let router_rules = CCRRouterRules {
-        default: router_config["default"].as_str().unwrap_or("").to_string(),
-        background: router_config["background"].as_str().unwrap_or("").to_string(),
-        think: router_config["think"].as_str().unwrap_or("").to_string(),
-        long_context: router_config["longContext"].as_str().unwrap_or("").to_string(),
-        web_search: router_config["webSearch"].as_str().unwrap_or("").to_string(),
-        long_context_threshold: router_config["longContextThreshold"].as_u64().unwrap_or(60000),
+        default: config.router_data.routing_rules.default.clone(),
+        background: config.router_data.routing_rules.background.clone().unwrap_or_default(),
+        think: config.router_data.routing_rules.think.clone().unwrap_or_default(),
+        long_context: config.router_data.routing_rules.long_context.clone().unwrap_or_default(),
+        web_search: config.router_data.routing_rules.analysis.clone().unwrap_or_default(),
+        long_context_threshold: 60000, // TODO: 从配置中读取
     };
-
+    
     Ok(CCRConfigInfo {
         providers,
         router_rules,
-        host: config_json["HOST"].as_str().unwrap_or("127.0.0.1").to_string(),
-        port: config_json["PORT"].as_u64().unwrap_or(3456) as u16,
-        api_timeout_ms: config_json["API_TIMEOUT_MS"]
-            .as_str()
-            .unwrap_or("600000")
-            .parse()
-            .unwrap_or(600000),
-        log_enabled: config_json["LOG"].as_bool().unwrap_or(false),
+        host: config.router_data.global_settings.host.clone(),
+        port: config.router.port,
+        api_timeout_ms: config.router_data.global_settings.api_timeout_ms,
+        log_enabled: config.router_data.global_settings.log_level != "none",
     })
 }
 
-/// 获取所有可用的模型列表
+/// 从ConfigManager获取所有可用的模型列表
 #[tauri::command]
-pub async fn router_get_ccr_models() -> Result<Vec<CCRModel>, String> {
-    let config = router_get_ccr_config().await?;
+pub async fn router_get_models_from_config(state: State<'_, RouterManagerState>) -> Result<Vec<CCRModel>, String> {
+    let config_manager_clone = {
+        let config_manager_guard = state.config_manager.lock().unwrap();
+        config_manager_guard.as_ref()
+            .ok_or("Router尚未初始化，请先调用router_init")?
+            .clone()
+    };
+    
+    let config_manager = config_manager_clone.read().await;
+    let config = config_manager.get_config();
     
     let mut models = Vec::new();
-    for provider in config.providers {
-        for model_name in provider.models {
+    for provider in &config.router_data.providers {
+        for model_name in &provider.models {
             models.push(CCRModel {
                 provider: provider.name.clone(),
                 model: model_name.clone(),
@@ -124,6 +111,103 @@ pub async fn router_get_ccr_models() -> Result<Vec<CCRModel>, String> {
     }
     
     Ok(models)
+}
+
+/// 自动发现提供商的可用模型
+#[tauri::command]
+pub async fn router_discover_provider_models(
+    provider_name: String,
+    state: State<'_, RouterManagerState>,
+) -> Result<Vec<String>, String> {
+    let config_manager_clone = {
+        let config_manager_guard = state.config_manager.lock().unwrap();
+        config_manager_guard.as_ref()
+            .ok_or("Router尚未初始化，请先调用router_init")?
+            .clone()
+    };
+    
+    let config_manager = config_manager_clone.read().await;
+    let config = config_manager.get_config();
+    
+    // 查找指定的提供商
+    let provider = config.router_data.providers.iter()
+        .find(|p| p.name == provider_name)
+        .ok_or(format!("未找到提供商: {}", provider_name))?;
+    
+    // 构建 API URL
+    let models_url = if provider.api_base_url.contains("/chat/completions") {
+        provider.api_base_url.replace("/chat/completions", "/models")
+    } else if provider.api_base_url.contains("/v1") {
+        format!("{}/models", provider.api_base_url.split("/v1").next().unwrap())
+    } else {
+        return Err("无法确定模型列表API端点".to_string());
+    };
+    
+    // 发起请求
+    let client = reqwest::Client::new();
+    let mut request = client.get(&models_url);
+    
+    // 添加API密钥
+    if !provider.api_key.is_empty() {
+        request = request.header("Authorization", format!("Bearer {}", provider.api_key));
+    }
+    
+    let response = request.send().await
+        .map_err(|e| format!("请求模型列表失败: {}", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("获取模型列表失败: {}", response.status()));
+    }
+    
+    let models_json: Value = response.json().await
+        .map_err(|e| format!("解析模型列表失败: {}", e))?;
+    
+    // 解析模型列表
+    let models = if let Some(data_array) = models_json["data"].as_array() {
+        data_array.iter()
+            .filter_map(|model| model["id"].as_str().map(String::from))
+            .collect()
+    } else if let Some(models_array) = models_json["models"].as_array() {
+        models_array.iter()
+            .filter_map(|model| model["name"].as_str().or(model["id"].as_str()).map(String::from))
+            .collect()
+    } else {
+        vec![]
+    };
+    
+    Ok(models)
+}
+
+/// 更新提供商的模型列表
+#[tauri::command]
+pub async fn router_update_provider_models(
+    provider_name: String,
+    models: Vec<String>,
+    state: State<'_, RouterManagerState>,
+) -> Result<String, String> {
+    let config_manager_clone = {
+        let config_manager_guard = state.config_manager.lock().unwrap();
+        config_manager_guard.as_ref()
+            .ok_or("Router尚未初始化，请先调用router_init")?
+            .clone()
+    };
+    
+    let mut config_manager = config_manager_clone.write().await;
+    let mut config = config_manager.get_config().clone();
+    
+    // 更新指定提供商的模型列表
+    if let Some(provider) = config.router_data.providers.iter_mut()
+        .find(|p| p.name == provider_name) {
+        provider.models = models;
+    } else {
+        return Err(format!("未找到提供商: {}", provider_name));
+    }
+    
+    // 保存配置
+    config_manager.update_config(config).await
+        .map_err(|e| format!("更新配置失败: {}", e))?;
+    
+    Ok("模型列表更新成功".to_string())
 }
 
 /// 检查CCR服务是否健康
@@ -152,25 +236,24 @@ pub async fn router_ccr_health_check() -> Result<bool, String> {
     }
 }
 
-/// 发送模型切换命令到Claude CLI
+/// [已废弃] 发送模型切换命令到Claude CLI
+/// 请使用 router_switch_model 进行统一的模型切换
 #[tauri::command]
+#[deprecated(note = "请使用 router_switch_model 替代")]
 pub async fn router_send_model_command(
-    provider_name: String,
-    model_name: String,
+    _provider_name: String,
+    _model_name: String,
     _session_id: Option<String>,
 ) -> Result<String, String> {
-    let model_command = format!("/model {},{}", provider_name, model_name);
-    
-    log::info!("发送模型切换命令: {}", model_command);
-    
-    // 发送事件到前端，由前端的Claude session处理
-    Ok(format!("模型切换命令: {}", model_command))
+    // 直接调用统一的模型切换API
+    log::warn!("router_send_model_command 已废弃，请使用 router_switch_model");
+    Err("此功能已废弃，请使用 router_switch_model 进行模型切换".to_string())
 }
 
 /// Router管理器状态
 pub struct RouterManagerState {
-    manager: Mutex<Option<Arc<RwLock<RouterProcessManager>>>>,
-    config_manager: Mutex<Option<Arc<RwLock<ConfigManager>>>>,
+    pub manager: Mutex<Option<Arc<RwLock<RouterProcessManager>>>>,
+    pub config_manager: Mutex<Option<Arc<RwLock<ConfigManager>>>>,
 }
 
 impl Default for RouterManagerState {
@@ -437,25 +520,33 @@ pub async fn router_get_process_id(
 pub async fn router_get_available_models(
     state: State<'_, RouterManagerState>,
 ) -> Result<Vec<AIModel>, String> {
-    let manager_clone = {
-        let manager_guard = state.manager.lock().unwrap();
-        match manager_guard.as_ref() {
-            Some(manager) => Some(manager.clone()),
-            None => None,
-        }
+    // 优先从ConfigManager获取模型列表，避免依赖ProxyClient
+    let config_manager_clone = {
+        let config_manager_guard = state.config_manager.lock().unwrap();
+        config_manager_guard.as_ref()
+            .ok_or("Router尚未初始化，请先调用router_init")?
+            .clone()
     };
     
-    match manager_clone {
-        Some(manager) => {
-            let manager_read = manager.read().await;
-            if let Some(client) = manager_read.get_proxy_client() {
-                client.get_available_models().await.map_err(|e| e.to_string())
-            } else {
-                Err("Router代理客户端未初始化".to_string())
-            }
+    let config_manager = config_manager_clone.read().await;
+    let config = config_manager.get_config();
+    
+    // 转换为AIModel格式
+    let mut models = Vec::new();
+    for provider in &config.router_data.providers {
+        for model_name in &provider.models {
+            models.push(AIModel {
+                provider: provider.name.clone(),
+                name: model_name.clone(),
+                display_name: format!("{} - {}", provider.name, model_name),
+                available: provider.enabled,
+                context_limit: None,
+                cost_per_token: None,
+            });
         }
-        None => Err("Router管理器未初始化".to_string()),
     }
+    
+    Ok(models)
 }
 
 /// 手动切换模型
@@ -493,24 +584,26 @@ pub async fn router_switch_model(
 pub async fn router_get_active_model(
     state: State<'_, RouterManagerState>,
 ) -> Result<(String, String), String> {
-    let manager_clone = {
-        let manager_guard = state.manager.lock().unwrap();
-        match manager_guard.as_ref() {
-            Some(manager) => Some(manager.clone()),
-            None => None,
-        }
+    // 从配置中获取默认模型
+    let config_manager_clone = {
+        let config_manager_guard = state.config_manager.lock().unwrap();
+        config_manager_guard.as_ref()
+            .ok_or("Router尚未初始化，请先调用router_init")?
+            .clone()
     };
     
-    match manager_clone {
-        Some(manager) => {
-            let manager_read = manager.read().await;
-            if let Some(client) = manager_read.get_proxy_client() {
-                client.get_active_model().await.map_err(|e| e.to_string())
-            } else {
-                Err("Router代理客户端未初始化".to_string())
-            }
-        }
-        None => Err("Router管理器未初始化".to_string()),
+    let config_manager = config_manager_clone.read().await;
+    let config = config_manager.get_config();
+    
+    // 解析默认路由规则中的模型信息
+    let default_model = &config.router_data.routing_rules.default;
+    let parts: Vec<&str> = default_model.split(',').collect();
+    
+    if parts.len() == 2 {
+        Ok((parts[0].to_string(), parts[1].to_string()))
+    } else {
+        // 如果格式不正确，返回默认值
+        Ok(("anthropic".to_string(), "claude-3-sonnet-20240229".to_string()))
     }
 }
 
@@ -519,6 +612,7 @@ pub async fn router_get_active_model(
 pub async fn router_get_stats(
     state: State<'_, RouterManagerState>,
 ) -> Result<RouterStats, String> {
+    // 如果Manager和ProxyClient已初始化，尝试从Router获取实时统计
     let manager_clone = {
         let manager_guard = state.manager.lock().unwrap();
         match manager_guard.as_ref() {
@@ -531,12 +625,44 @@ pub async fn router_get_stats(
         Some(manager) => {
             let manager_read = manager.read().await;
             if let Some(client) = manager_read.get_proxy_client() {
-                client.get_router_stats().await.map_err(|e| e.to_string())
+                // 尝试从Router获取统计信息
+                match client.get_router_stats().await {
+                    Ok(stats) => Ok(stats),
+                    Err(_) => {
+                        // 如果失败，返回默认统计信息
+                        Ok(RouterStats {
+                            total_requests: 0,
+                            successful_requests: 0,
+                            failed_requests: 0,
+                            total_cost: 0.0,
+                            average_response_time: 0.0,
+                            last_updated: chrono::Utc::now(),
+                        })
+                    }
+                }
             } else {
-                Err("Router代理客户端未初始化".to_string())
+                // ProxyClient未初始化，返回默认统计信息
+                Ok(RouterStats {
+                    total_requests: 0,
+                    successful_requests: 0,
+                    failed_requests: 0,
+                    total_cost: 0.0,
+                    average_response_time: 0.0,
+                    last_updated: chrono::Utc::now(),
+                })
             }
         }
-        None => Err("Router管理器未初始化".to_string()),
+        None => {
+            // Manager未初始化，返回默认统计信息
+            Ok(RouterStats {
+                total_requests: 0,
+                successful_requests: 0,
+                failed_requests: 0,
+                total_cost: 0.0,
+                average_response_time: 0.0,
+                last_updated: chrono::Utc::now(),
+            })
+        }
     }
 }
 

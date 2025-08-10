@@ -78,6 +78,24 @@ pub struct TransformerConfig {
 }
 
 /// 路由规则配置
+/// 动态路由规则
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicRoutingRule {
+    /// 规则ID
+    pub id: String,
+    /// 规则名称
+    pub name: String,
+    /// 触发关键词列表
+    pub keywords: Vec<String>,
+    /// 目标模型 (provider,model格式)
+    pub target_model: String,
+    /// 优先级 (数字越大优先级越高)
+    pub priority: i32,
+    /// 是否启用
+    pub enabled: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RoutingRules {
@@ -93,6 +111,9 @@ pub struct RoutingRules {
     pub coding: Option<String>,
     /// 分析任务路由
     pub analysis: Option<String>,
+    /// 动态路由规则列表
+    #[serde(default)]
+    pub dynamic_rules: Vec<DynamicRoutingRule>,
 }
 
 impl Default for RoutingRules {
@@ -104,6 +125,7 @@ impl Default for RoutingRules {
             long_context: Some("google,gemini-pro".to_string()),
             coding: Some("openai,gpt-4-turbo".to_string()),
             analysis: Some("anthropic,claude-3-sonnet-20240229".to_string()),
+            dynamic_rules: Vec::new(),
         }
     }
 }
@@ -282,6 +304,13 @@ impl ConfigManager {
     /// 更新路由模式
     pub async fn update_routing_mode(&mut self, mode: RoutingMode) -> RouterResult<()> {
         self.config.integration.routing_mode = mode;
+        self.save_current_config().await?;
+        Ok(())
+    }
+    
+    /// 更新完整配置
+    pub async fn update_config(&mut self, config: IntegratedConfig) -> RouterResult<()> {
+        self.config = config;
         self.save_current_config().await?;
         Ok(())
     }

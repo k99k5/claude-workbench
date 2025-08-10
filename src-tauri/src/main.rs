@@ -63,8 +63,13 @@ use commands::router::{
     router_test_connection, router_route_claude_request, router_validate_config,
     router_sync_from_workbench, router_get_default_config, router_health_check,
     // 新的CCR集成命令
-    router_get_ccr_config, router_get_ccr_models, router_ccr_health_check, router_send_model_command,
+    router_get_config_from_manager, router_get_models_from_config, router_ccr_health_check, router_send_model_command,
+    router_discover_provider_models, router_update_provider_models,
     RouterManagerState,
+};
+use commands::router_dynamic_rules::{
+    router_get_dynamic_rules, router_add_dynamic_rule, router_update_dynamic_rule,
+    router_delete_dynamic_rule, router_match_dynamic_rule,
 };
 use process::ProcessRegistryState;
 use std::sync::Mutex;
@@ -282,10 +287,19 @@ fn main() {
             router_health_check,
             
             // CCR 集成命令
-            router_get_ccr_config,
-            router_get_ccr_models,
+            router_get_config_from_manager,
+            router_get_models_from_config,
             router_ccr_health_check,
             router_send_model_command,
+            router_discover_provider_models,
+            router_update_provider_models,
+            
+            // 动态路由规则命令
+            router_get_dynamic_rules,
+            router_add_dynamic_rule,
+            router_update_dynamic_rule,
+            router_delete_dynamic_rule,
+            router_match_dynamic_rule,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

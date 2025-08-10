@@ -37,7 +37,7 @@ interface ModelSwitcherProps {
   onModelSwitched?: (provider: string, model: string) => void;
 }
 
-export default function ModelSwitcher({ sessionId, onModelSwitched }: ModelSwitcherProps) {
+export default function ModelSwitcher({ onModelSwitched }: ModelSwitcherProps) {
   const [models, setModels] = useState<CCRModel[]>([]);
   const [config, setConfig] = useState<CCRConfigInfo | null>(null);
   const [selectedModel, setSelectedModel] = useState<string>('');
@@ -71,11 +71,11 @@ export default function ModelSwitcher({ sessionId, onModelSwitched }: ModelSwitc
       }
 
       // 获取配置信息
-      const configData = await invoke<CCRConfigInfo>('router_get_ccr_config');
+      const configData = await invoke<CCRConfigInfo>('router_get_config_from_manager');
       setConfig(configData);
 
       // 获取模型列表
-      const modelsData = await invoke<CCRModel[]>('router_get_ccr_models');
+      const modelsData = await invoke<CCRModel[]>('router_get_models_from_config');
       setModels(modelsData);
 
       // 设置当前模型（默认模型）
@@ -101,11 +101,10 @@ export default function ModelSwitcher({ sessionId, onModelSwitched }: ModelSwitc
     try {
       const [provider, model] = selectedModel.split(',');
       
-      // 发送模型切换命令
-      await invoke<string>('router_send_model_command', {
-        providerName: provider,
-        modelName: model,
-        sessionId: sessionId || null,
+      // 使用统一的模型切换API
+      await invoke<string>('router_switch_model', {
+        provider: provider,
+        model: model,
       });
 
       setCurrentModel(selectedModel);

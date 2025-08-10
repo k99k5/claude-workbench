@@ -31,6 +31,7 @@ import { useRouter } from '@/hooks/useRouter';
 import { RoutingMode, RouterUtils } from '@/lib/router-types';
 import ModelSwitcher from '@/components/ModelSwitcher';
 import CCRWebView from '@/components/CCRWebView';
+import DynamicRoutingRules from '@/components/DynamicRoutingRules';
 
 /**
  * Router仪表盘主组件
@@ -221,9 +222,10 @@ export function RouterDashboard() {
       )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="control">控制面板</TabsTrigger>
           <TabsTrigger value="models">模型切换</TabsTrigger>
+          <TabsTrigger value="routing">路由规则</TabsTrigger>
           <TabsTrigger value="webui">Web管理</TabsTrigger>
           <TabsTrigger value="stats">统计监控</TabsTrigger>
           <TabsTrigger value="config">配置管理</TabsTrigger>
@@ -596,6 +598,11 @@ export function RouterDashboard() {
               }}
             />
           </div>
+        </TabsContent>
+
+        {/* 动态路由规则 */}
+        <TabsContent value="routing">
+          <DynamicRoutingRules />
         </TabsContent>
 
         {/* Web管理界面 */}
