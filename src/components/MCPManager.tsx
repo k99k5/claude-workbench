@@ -34,6 +34,7 @@ export const MCPManager: React.FC<MCPManagerProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [cacheTimestamp, setCacheTimestamp] = useState<number | null>(null);
 
   // Load servers on mount
   useEffect(() => {
@@ -41,17 +42,26 @@ export const MCPManager: React.FC<MCPManagerProps> = ({
   }, []);
 
   /**
-   * Loads all MCP servers
+   * Loads all MCP servers with caching
    */
-  const loadServers = async () => {
+  const loadServers = async (forceRefresh = false) => {
+    const now = Date.now();
+    const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes cache
+    
+    // Check cache validity
+    if (!forceRefresh && cacheTimestamp && servers.length > 0 && (now - cacheTimestamp) < CACHE_DURATION) {
+      return; // Use cached data, no loading state needed
+    }
+
     try {
-      setLoading(true);
+      // Only show loading state if we don't have cached data
+      if (servers.length === 0) {
+        setLoading(true);
+      }
       setError(null);
-      console.log("MCPManager: Loading servers...");
       const serverList = await api.mcpList();
-      console.log("MCPManager: Received server list:", serverList);
-      console.log("MCPManager: Server count:", serverList.length);
       setServers(serverList);
+      setCacheTimestamp(now);
     } catch (err) {
       console.error("MCPManager: Failed to load MCP servers:", err);
       setError("加载 MCP 服务器失败。请确保 Claude Code 已安装。");
@@ -64,7 +74,7 @@ export const MCPManager: React.FC<MCPManagerProps> = ({
    * Handles server added event
    */
   const handleServerAdded = () => {
-    loadServers();
+    loadServers(true); // Force refresh when server is added
     setToast({ message: "MCP 服务器添加成功！", type: "success" });
     setActiveTab("servers");
   };
@@ -81,7 +91,10 @@ export const MCPManager: React.FC<MCPManagerProps> = ({
    * Handles import completed event
    */
   const handleImportCompleted = (imported: number, failed: number) => {
-    loadServers();
+    // Only refresh if servers were actually imported
+    if (imported > 0) {
+      loadServers(true); // Force refresh when servers are imported
+    }
     if (failed === 0) {
       setToast({ 
         message: `成功导入 ${imported} 个服务器！`, 
@@ -171,7 +184,7 @@ export const MCPManager: React.FC<MCPManagerProps> = ({
                     servers={servers}
                     loading={false}
                     onServerRemoved={handleServerRemoved}
-                    onRefresh={loadServers}
+                    onRefresh={() => loadServers(true)}
                   />
                 </Card>
               </TabsContent>

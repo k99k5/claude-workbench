@@ -1,9 +1,10 @@
 import React, { useState } from "react";
-import { Download, Upload, FileText, Loader2, Info, Network, Settings2 } from "lucide-react";
+import { Download, Upload, FileText, Loader2, Info, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { SelectComponent } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
 
 interface MCPImportExportProps {
@@ -24,47 +25,78 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
   onImportCompleted,
   onError,
 }) => {
-  const [importingDesktop, setImportingDesktop] = useState(false);
   const [importingJson, setImportingJson] = useState(false);
+  const [importingText, setImportingText] = useState(false);
+  const [textInput, setTextInput] = useState("");
   const [importScope, setImportScope] = useState("user");
 
   /**
-   * Imports servers from Claude Desktop
+   * Handles text input import
    */
-  const handleImportFromDesktop = async () => {
+  const handleImportFromText = async () => {
+    if (!textInput.trim()) return;
+
     try {
-      setImportingDesktop(true);
-      // Always use "user" scope for Claude Desktop imports (was previously "global")
-      const result = await api.mcpAddFromClaudeDesktop("user");
+      setImportingText(true);
       
-      // Show detailed results if available
-      if (result.servers && result.servers.length > 0) {
-        const successfulServers = result.servers.filter(s => s.success);
-        const failedServers = result.servers.filter(s => !s.success);
-        
-        if (successfulServers.length > 0) {
-          const successMessage = `Successfully imported: ${successfulServers.map(s => s.name).join(", ")}`;
-          onImportCompleted(result.imported_count, result.failed_count);
-          // Show success details
-          if (failedServers.length === 0) {
-            onError(successMessage);
+      // Parse the JSON to validate it
+      let jsonData;
+      try {
+        jsonData = JSON.parse(textInput);
+      } catch (e) {
+        onError("无效的 JSON 格式。请检查输入格式。");
+        return;
+      }
+
+      // Check if it's a single server or multiple servers
+      if (jsonData.mcpServers) {
+        // Multiple servers format
+        let imported = 0;
+        let failed = 0;
+
+        for (const [name, config] of Object.entries(jsonData.mcpServers)) {
+          try {
+            const serverConfig = {
+              type: "stdio",
+              command: (config as any).command,
+              args: (config as any).args || [],
+              env: (config as any).env || {}
+            };
+            
+            const result = await api.mcpAddJson(name, JSON.stringify(serverConfig), importScope);
+            if (result.success) {
+              imported++;
+            } else {
+              failed++;
+            }
+          } catch (e) {
+            failed++;
           }
         }
         
-        if (failedServers.length > 0) {
-          const failureDetails = failedServers
-            .map(s => `${s.name}: ${s.error || "Unknown error"}`)
-            .join("\n");
-          onError(`Failed to import some servers:\n${failureDetails}`);
+        onImportCompleted(imported, failed);
+      } else if (jsonData.type && jsonData.command) {
+        // Single server format
+        const name = prompt("请输入此服务器的名称：");
+        if (!name) return;
+
+        const result = await api.mcpAddJson(name, textInput, importScope);
+        if (result.success) {
+          onImportCompleted(1, 0);
+        } else {
+          onError(result.message);
         }
       } else {
-        onImportCompleted(result.imported_count, result.failed_count);
+        onError("无法识别的 JSON 格式。需要 MCP 服务器配置格式。");
       }
-    } catch (error: any) {
-      console.error("Failed to import from Claude Desktop:", error);
-      onError(error.toString() || "Failed to import from Claude Desktop");
+      
+      // Clear text input on successful import
+      setTextInput("");
+    } catch (error) {
+      console.error("Failed to import from text:", error);
+      onError("导入文本失败");
     } finally {
-      setImportingDesktop(false);
+      setImportingText(false);
     }
   };
 
@@ -169,18 +201,6 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
     }
   };
 
-  /**
-   * Starts Claude Code as MCP server
-   */
-  const handleStartMCPServer = async () => {
-    try {
-      await api.mcpServe();
-      onError("Claude Code MCP 服务器已启动。您现在可以从其他应用程序连接到它。");
-    } catch (error) {
-      console.error("Failed to start MCP server:", error);
-      onError("启动 Claude Code 作为 MCP 服务器失败");
-    }
-  };
 
   return (
     <div className="p-6 space-y-6">
@@ -214,7 +234,7 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
           </div>
         </Card>
 
-        {/* Import from Claude Desktop */}
+        {/* Import from Text Input */}
         <Card className="p-4 hover:bg-accent/5 transition-colors">
           <div className="space-y-3">
             <div className="flex items-start gap-3">
@@ -222,29 +242,38 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
                 <Download className="h-5 w-5 text-blue-500" />
               </div>
               <div className="flex-1">
-                <h4 className="text-sm font-medium">从 Claude Desktop 导入</h4>
+                <h4 className="text-sm font-medium">从文本输入导入</h4>
                 <p className="text-xs text-muted-foreground mt-1">
-                  自动导入 Claude Desktop 中的所有 MCP 服务器配置。安装到用户范围（可在所有项目中使用）。
+                  粘贴 MCP 服务器配置 JSON 文本进行批量导入
                 </p>
               </div>
             </div>
-            <Button
-              onClick={handleImportFromDesktop}
-              disabled={importingDesktop}
-              className="w-full gap-2 bg-primary hover:bg-primary/90"
-            >
-              {importingDesktop ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  导入中...
-                </>
-              ) : (
-                <>
-                  <Download className="h-4 w-4" />
-                  从 Claude Desktop 导入
-                </>
-              )}
-            </Button>
+            <div className="space-y-3">
+              <textarea
+                placeholder="粘贴 MCP 服务器配置 JSON..."
+                value={textInput}
+                onChange={(e) => setTextInput(e.target.value)}
+                disabled={importingText}
+                className="w-full min-h-[120px] px-3 py-2 border rounded-md resize-vertical font-mono text-sm"
+              />
+              <Button
+                onClick={handleImportFromText}
+                disabled={importingText || !textInput.trim()}
+                className="w-full gap-2 bg-primary hover:bg-primary/90"
+              >
+                {importingText ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    导入中...
+                  </>
+                ) : (
+                  <>
+                    <Download className="h-4 w-4" />
+                    从文本导入
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
         </Card>
 
@@ -318,69 +347,75 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
           </div>
         </Card>
 
-        {/* Serve as MCP */}
-        <Card className="p-4 border-primary/20 bg-primary/5 hover:bg-primary/10 transition-colors">
-          <div className="space-y-3">
-            <div className="flex items-start gap-3">
-              <div className="p-2.5 bg-green-500/20 rounded-lg">
-                <Network className="h-5 w-5 text-green-500" />
-              </div>
-              <div className="flex-1">
-                <h4 className="text-sm font-medium">将 Claude Code 用作 MCP 服务器</h4>
-                <p className="text-xs text-muted-foreground mt-1">
-                  启动 Claude Code 作为 MCP 服务器，供其他应用程序连接使用
-                </p>
-              </div>
-            </div>
-            <Button
-              onClick={handleStartMCPServer}
-              variant="outline"
-              className="w-full gap-2 border-green-500/20 hover:bg-green-500/10 hover:text-green-600 hover:border-green-500/50"
-            >
-              <Network className="h-4 w-4" />
-              启动 MCP 服务器
-            </Button>
-          </div>
-        </Card>
       </div>
 
-      {/* Info Box */}
-      <Card className="p-4 bg-muted/30">
-        <div className="space-y-3">
-          <div className="flex items-center gap-2 text-sm font-medium">
-            <Info className="h-4 w-4 text-primary" />
-            <span>JSON 格式示例</span>
+      {/* Format Examples */}
+      <Card className="p-6 bg-muted/30">
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 text-base font-semibold">
+            <Info className="h-5 w-5 text-primary" />
+            <span>支持的 JSON 格式</span>
           </div>
-          <div className="space-y-3 text-xs">
+          
+          <div className="grid gap-6">
+            {/* Claude Desktop Format */}
             <div>
-              <p className="font-medium text-muted-foreground mb-1">单个服务器：</p>
-              <pre className="bg-background p-3 rounded-lg overflow-x-auto">
-{`{
-  "type": "stdio",
-  "command": "/path/to/server",
-  "args": ["--arg1", "value"],
-  "env": { "KEY": "value" }
-}`}
-              </pre>
-            </div>
-            <div>
-              <p className="font-medium text-muted-foreground mb-1">多个服务器 (.mcp.json 格式)：</p>
-              <pre className="bg-background p-3 rounded-lg overflow-x-auto">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                <h4 className="font-semibold text-sm">Claude Desktop 格式</h4>
+                <Badge variant="secondary" className="text-xs">推荐</Badge>
+              </div>
+              <pre className="bg-background p-4 rounded-lg overflow-x-auto text-xs border">
 {`{
   "mcpServers": {
-    "server1": {
-      "command": "/path/to/server1",
-      "args": [],
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed-dir"],
       "env": {}
     },
-    "server2": {
-      "command": "/path/to/server2",
-      "args": ["--port", "8080"],
-      "env": { "API_KEY": "..." }
+    "brave-search": {
+      "command": "uvx",
+      "args": ["mcp-server-brave-search"],
+      "env": {
+        "BRAVE_SEARCH_API_KEY": "your-api-key"
+      }
     }
   }
 }`}
               </pre>
+            </div>
+            
+            {/* Single Server Format */}
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                <h4 className="font-semibold text-sm">单个服务器格式</h4>
+              </div>
+              <pre className="bg-background p-4 rounded-lg overflow-x-auto text-xs border">
+{`{
+  "type": "stdio",
+  "command": "uvx",
+  "args": ["mcp-server-git", "--repository", "/path/to/repo"],
+  "env": {
+    "GIT_AUTHOR_NAME": "Your Name"
+  }
+}`}
+              </pre>
+            </div>
+          </div>
+          
+          <div className="bg-blue-50 dark:bg-blue-950/30 p-4 rounded-lg border-l-4 border-blue-500">
+            <div className="flex items-start gap-3">
+              <Info className="h-4 w-4 text-blue-500 mt-0.5 flex-shrink-0" />
+              <div className="space-y-2 text-sm">
+                <p className="font-medium text-blue-700 dark:text-blue-300">使用提示：</p>
+                <ul className="space-y-1 text-blue-600 dark:text-blue-400 text-xs">
+                  <li>• <strong>Claude Desktop 格式</strong>：支持批量导入多个服务器</li>
+                  <li>• <strong>单个服务器格式</strong>：导入时需要手动输入服务器名称</li>
+                  <li>• <strong>环境变量</strong>：可选，用于配置 API 密钥等敏感信息</li>
+                  <li>• <strong>命令参数</strong>：根据具体 MCP 服务器的要求配置</li>
+                </ul>
+              </div>
             </div>
           </div>
         </div>
