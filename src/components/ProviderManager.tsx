@@ -145,8 +145,21 @@ export default function ProviderManager({ onBack }: ProviderManagerProps) {
   const handleFormSubmit = async (formData: Omit<ProviderConfig, 'id'>) => {
     try {
       if (editingProvider) {
-        await api.updateProviderConfig({ ...formData, id: editingProvider.id });
-        setToastMessage({ message: '代理商更新成功', type: 'success' });
+        const updatedConfig = { ...formData, id: editingProvider.id };
+        await api.updateProviderConfig(updatedConfig);
+        
+        // 如果编辑的是当前活跃的代理商，同步更新配置文件
+        if (isCurrentProvider(editingProvider)) {
+          try {
+            await api.switchProviderConfig(updatedConfig);
+            setToastMessage({ message: '代理商更新成功，配置文件已同步更新', type: 'success' });
+          } catch (switchError) {
+            console.error('Failed to sync provider config:', switchError);
+            setToastMessage({ message: '代理商更新成功，但配置文件同步失败', type: 'error' });
+          }
+        } else {
+          setToastMessage({ message: '代理商更新成功', type: 'success' });
+        }
       } else {
         await api.addProviderConfig(formData);
         setToastMessage({ message: '代理商添加成功', type: 'success' });

@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { 
   Save, 
   X, 
@@ -33,6 +34,7 @@ export default function ProviderForm({
     model: initialData?.model || '',
     // api_key_helper 将由后端根据 auth_token 自动生成
     api_key_helper: undefined,
+    enable_auto_api_key_helper: initialData?.enable_auto_api_key_helper || false,
   });
   
   const [loading, setLoading] = useState(false);
@@ -86,6 +88,7 @@ export default function ProviderForm({
         model: formData.model?.trim() || undefined,
         // api_key_helper 由后端自动生成，不从前端传递
         api_key_helper: undefined,
+        enable_auto_api_key_helper: formData.enable_auto_api_key_helper,
       };
 
       await onSubmit(submitData);
@@ -234,10 +237,37 @@ export default function ProviderForm({
                   </p>
                 </div>
                 
-                {/* API Key Helper 说明 - 不再需要手动输入 */}
-                <div className="p-3 bg-muted/50 rounded-lg">
+                {/* API Key Helper 控制选项 */}
+                <div className="p-3 bg-muted/50 rounded-lg space-y-3">
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="enable-auto-api-key-helper"
+                      checked={formData.enable_auto_api_key_helper}
+                      onCheckedChange={(checked) => 
+                        setFormData(prev => ({
+                          ...prev,
+                          enable_auto_api_key_helper: !!checked
+                        }))
+                      }
+                      disabled={loading}
+                    />
+                    <Label 
+                      htmlFor="enable-auto-api-key-helper" 
+                      className="text-sm font-medium cursor-pointer"
+                    >
+                      自动生成 API Key Helper
+                    </Label>
+                  </div>
                   <p className="text-xs text-muted-foreground">
-                    💡 <strong>API Key Helper 自动生成：</strong>系统将根据认证Token自动生成 apiKeyHelper 命令（格式：echo 'your-token'），无需手动配置。
+                    {formData.enable_auto_api_key_helper ? (
+                      <>
+                        ✅ <strong>已启用：</strong>系统将根据认证Token自动生成 apiKeyHelper 命令（格式：echo 'your-token'）
+                      </>
+                    ) : (
+                      <>
+                        ⚠️ <strong>已禁用：</strong>不会自动生成 apiKeyHelper。如果当前配置无法使用，请勾选此选项后再次尝试。
+                      </>
+                    )}
                   </p>
                 </div>
               </div>

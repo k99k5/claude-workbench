@@ -14,6 +14,7 @@ pub struct ProviderConfig {
     pub api_key: Option<String>,
     pub api_key_helper: Option<String>,
     pub model: Option<String>,
+    pub enable_auto_api_key_helper: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -276,15 +277,20 @@ pub async fn switch_provider_config(_app: AppHandle, config: ProviderConfig) -> 
         }
     }
     
-    // apiKeyHelper 自动生成 - 使用 ANTHROPIC_AUTH_TOKEN 的值
-    if let Some(token) = auth_token {
-        let helper_command = format!("echo '{}'", token);
-        settings_obj.insert("apiKeyHelper".to_string(), serde_json::Value::String(helper_command));
-        log::info!("自动生成 apiKeyHelper 命令: echo '[TOKEN_MASKED]'");
+    // apiKeyHelper 根据用户勾选状态决定是否自动生成
+    if config.enable_auto_api_key_helper.unwrap_or(false) {
+        if let Some(token) = auth_token {
+            let helper_command = format!("echo '{}'", token);
+            settings_obj.insert("apiKeyHelper".to_string(), serde_json::Value::String(helper_command));
+            log::info!("用户启用了自动生成 apiKeyHelper，已生成命令: echo '[TOKEN_MASKED]'");
+        } else {
+            log::info!("用户启用了自动生成，但未找到认证令牌，无法生成 apiKeyHelper");
+            settings_obj.remove("apiKeyHelper");
+        }
     } else {
-        // 如果没有认证令牌，移除 apiKeyHelper 字段
+        // 用户未勾选自动生成，移除 apiKeyHelper 字段
         settings_obj.remove("apiKeyHelper");
-        log::info!("未找到认证令牌，移除 apiKeyHelper 字段");
+        log::info!("用户未启用自动生成 apiKeyHelper，已移除该字段");
     }
     
     // 保存设置

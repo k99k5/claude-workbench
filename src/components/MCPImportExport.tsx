@@ -26,7 +26,7 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
 }) => {
   const [importingDesktop, setImportingDesktop] = useState(false);
   const [importingJson, setImportingJson] = useState(false);
-  const [importScope, setImportScope] = useState("local");
+  const [importScope, setImportScope] = useState("user");
 
   /**
    * Imports servers from Claude Desktop
@@ -84,7 +84,7 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
       try {
         jsonData = JSON.parse(content);
       } catch (e) {
-        onError("Invalid JSON file. Please check the format.");
+        onError("无效的 JSON 文件。请检查格式。");
         return;
       }
 
@@ -117,7 +117,7 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
         onImportCompleted(imported, failed);
       } else if (jsonData.type && jsonData.command) {
         // Single server format
-        const name = prompt("Enter a name for this server:");
+        const name = prompt("请输入此服务器的名称：");
         if (!name) return;
 
         const result = await api.mcpAddJson(name, content, importScope);
@@ -127,11 +127,11 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
           onError(result.message);
         }
       } else {
-        onError("Unrecognized JSON format. Expected MCP server configuration.");
+        onError("无法识别的 JSON 格式。需要 MCP 服务器配置格式。");
       }
     } catch (error) {
       console.error("Failed to import JSON:", error);
-      onError("Failed to import JSON file");
+      onError("导入 JSON 文件失败");
     } finally {
       setImportingJson(false);
       // Reset the input
@@ -140,11 +140,33 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
   };
 
   /**
-   * Handles exporting servers (placeholder)
+   * Handles exporting servers
    */
-  const handleExport = () => {
-    // TODO: Implement export functionality
-    onError("Export functionality coming soon!");
+  const handleExport = async () => {
+    try {
+      // Get the configuration from .claude.json
+      const exportData = await api.mcpExportConfig();
+      
+      // Create a blob and download it
+      const blob = new Blob([exportData], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      
+      // Create download link
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `mcp-servers-config-${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      // Clean up
+      URL.revokeObjectURL(url);
+      
+      onError("✅ MCP服务器配置导出成功！文件已保存到下载文件夹。");
+    } catch (error: any) {
+      console.error("Failed to export MCP configuration:", error);
+      onError(`导出MCP配置失败: ${error.toString()}`);
+    }
   };
 
   /**
@@ -153,19 +175,19 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
   const handleStartMCPServer = async () => {
     try {
       await api.mcpServe();
-      onError("Claude Code MCP server started. You can now connect to it from other applications.");
+      onError("Claude Code MCP 服务器已启动。您现在可以从其他应用程序连接到它。");
     } catch (error) {
       console.error("Failed to start MCP server:", error);
-      onError("Failed to start Claude Code as MCP server");
+      onError("启动 Claude Code 作为 MCP 服务器失败");
     }
   };
 
   return (
     <div className="p-6 space-y-6">
       <div>
-        <h3 className="text-base font-semibold">Import & Export</h3>
+        <h3 className="text-base font-semibold">导入和导出</h3>
         <p className="text-sm text-muted-foreground mt-1">
-          Import MCP servers from other sources or export your configuration
+          从其他来源导入 MCP 服务器配置或导出您的配置
         </p>
       </div>
 
@@ -175,19 +197,19 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
           <div className="space-y-3">
             <div className="flex items-center gap-2 mb-2">
               <Settings2 className="h-4 w-4 text-slate-500" />
-              <Label className="text-sm font-medium">Import Scope</Label>
+              <Label className="text-sm font-medium">导入范围</Label>
             </div>
             <SelectComponent
               value={importScope}
               onValueChange={(value: string) => setImportScope(value)}
               options={[
-                { value: "local", label: "Local (this project only)" },
-                { value: "project", label: "Project (shared via .mcp.json)" },
-                { value: "user", label: "User (all projects)" },
+                { value: "local", label: "本地 (仅此项目)" },
+                { value: "project", label: "项目 (通过 .mcp.json 共享)" },
+                { value: "user", label: "用户 (所有项目)" },
               ]}
             />
             <p className="text-xs text-muted-foreground">
-              Choose where to save imported servers from JSON files
+              选择从 JSON 文件导入的服务器的保存位置
             </p>
           </div>
         </Card>
@@ -200,9 +222,9 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
                 <Download className="h-5 w-5 text-blue-500" />
               </div>
               <div className="flex-1">
-                <h4 className="text-sm font-medium">Import from Claude Desktop</h4>
+                <h4 className="text-sm font-medium">从 Claude Desktop 导入</h4>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Automatically imports all MCP servers from Claude Desktop. Installs to user scope (available across all projects).
+                  自动导入 Claude Desktop 中的所有 MCP 服务器配置。安装到用户范围（可在所有项目中使用）。
                 </p>
               </div>
             </div>
@@ -214,12 +236,12 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
               {importingDesktop ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Importing...
+                  导入中...
                 </>
               ) : (
                 <>
                   <Download className="h-4 w-4" />
-                  Import from Claude Desktop
+                  从 Claude Desktop 导入
                 </>
               )}
             </Button>
@@ -234,9 +256,9 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
                 <FileText className="h-5 w-5 text-purple-500" />
               </div>
               <div className="flex-1">
-                <h4 className="text-sm font-medium">Import from JSON</h4>
+                <h4 className="text-sm font-medium">从 JSON 导入</h4>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Import server configuration from a JSON file
+                  从 JSON 文件导入服务器配置
                 </p>
               </div>
             </div>
@@ -258,12 +280,12 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
                 {importingJson ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Importing...
+                    导入中...
                   </>
                 ) : (
                   <>
                     <FileText className="h-4 w-4" />
-                    Choose JSON File
+                    选择 JSON 文件
                   </>
                 )}
               </Button>
@@ -271,28 +293,27 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
           </div>
         </Card>
 
-        {/* Export (Coming Soon) */}
-        <Card className="p-4 opacity-60">
+        {/* Export Configuration */}
+        <Card className="p-4 hover:bg-accent/5 transition-colors">
           <div className="space-y-3">
             <div className="flex items-start gap-3">
-              <div className="p-2.5 bg-muted rounded-lg">
-                <Upload className="h-5 w-5 text-muted-foreground" />
+              <div className="p-2.5 bg-orange-500/10 rounded-lg">
+                <Upload className="h-5 w-5 text-orange-500" />
               </div>
               <div className="flex-1">
-                <h4 className="text-sm font-medium">Export Configuration</h4>
+                <h4 className="text-sm font-medium">导出配置</h4>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Export your MCP server configuration
+                  导出您的 MCP 服务器配置为 JSON 文件
                 </p>
               </div>
             </div>
             <Button
               onClick={handleExport}
-              disabled={true}
-              variant="secondary"
+              variant="outline"
               className="w-full gap-2"
             >
               <Upload className="h-4 w-4" />
-              Export (Coming Soon)
+              导出配置
             </Button>
           </div>
         </Card>
@@ -305,9 +326,9 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
                 <Network className="h-5 w-5 text-green-500" />
               </div>
               <div className="flex-1">
-                <h4 className="text-sm font-medium">Use Claude Code as MCP Server</h4>
+                <h4 className="text-sm font-medium">将 Claude Code 用作 MCP 服务器</h4>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Start Claude Code as an MCP server that other applications can connect to
+                  启动 Claude Code 作为 MCP 服务器，供其他应用程序连接使用
                 </p>
               </div>
             </div>
@@ -317,7 +338,7 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
               className="w-full gap-2 border-green-500/20 hover:bg-green-500/10 hover:text-green-600 hover:border-green-500/50"
             >
               <Network className="h-4 w-4" />
-              Start MCP Server
+              启动 MCP 服务器
             </Button>
           </div>
         </Card>
@@ -328,11 +349,11 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
         <div className="space-y-3">
           <div className="flex items-center gap-2 text-sm font-medium">
             <Info className="h-4 w-4 text-primary" />
-            <span>JSON Format Examples</span>
+            <span>JSON 格式示例</span>
           </div>
           <div className="space-y-3 text-xs">
             <div>
-              <p className="font-medium text-muted-foreground mb-1">Single server:</p>
+              <p className="font-medium text-muted-foreground mb-1">单个服务器：</p>
               <pre className="bg-background p-3 rounded-lg overflow-x-auto">
 {`{
   "type": "stdio",
@@ -343,7 +364,7 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
               </pre>
             </div>
             <div>
-              <p className="font-medium text-muted-foreground mb-1">Multiple servers (.mcp.json format):</p>
+              <p className="font-medium text-muted-foreground mb-1">多个服务器 (.mcp.json 格式)：</p>
               <pre className="bg-background p-3 rounded-lg overflow-x-auto">
 {`{
   "mcpServers": {

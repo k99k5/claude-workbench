@@ -695,6 +695,47 @@ pub async fn mcp_get_server_status() -> Result<HashMap<String, ServerStatus>, St
     Ok(HashMap::new())
 }
 
+/// Exports MCP server configuration from .claude.json
+#[tauri::command]
+pub async fn mcp_export_config() -> Result<String, String> {
+    info!("Exporting MCP server configuration from .claude.json");
+
+    // Get the .claude.json path from home directory
+    let home_dir = dirs::home_dir()
+        .ok_or_else(|| "无法获取用户主目录".to_string())?;
+    
+    let claude_config_path = home_dir.join(".claude.json");
+    
+    if !claude_config_path.exists() {
+        return Err("未找到 .claude.json 配置文件".to_string());
+    }
+    
+    // Read the .claude.json file
+    let config_content = fs::read_to_string(&claude_config_path)
+        .map_err(|e| format!("读取 .claude.json 文件失败: {}", e))?;
+    
+    // Parse as JSON
+    let config: serde_json::Value = serde_json::from_str(&config_content)
+        .map_err(|e| format!("解析 .claude.json 文件失败: {}", e))?;
+    
+    // Extract mcpServers section
+    let mcp_servers = config
+        .get("mcpServers")
+        .ok_or_else(|| "在 .claude.json 中未找到 mcpServers 配置".to_string())?;
+    
+    // Create export format matching Claude Desktop format
+    let export_data = serde_json::json!({
+        "mcpServers": mcp_servers
+    });
+    
+    // Convert to pretty JSON string
+    let export_json = serde_json::to_string_pretty(&export_data)
+        .map_err(|e| format!("序列化导出数据失败: {}", e))?;
+    
+    info!("Successfully exported MCP configuration");
+    Ok(export_json)
+}
+
 /// Reads .mcp.json from the current project
 #[tauri::command]
 pub async fn mcp_read_project_config(project_path: String) -> Result<MCPProjectConfig, String> {

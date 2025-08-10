@@ -523,14 +523,14 @@ export const HooksEditor: React.FC<HooksEditorProps> = ({
         
         <div className="flex-1 space-y-2">
           <div className="flex items-center gap-2">
-            <Label htmlFor={`matcher-${matcher.id}`}>模式</Label>
+            <Label htmlFor={`matcher-${matcher.id}`}>匹配模式</Label>
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Info className="h-3 w-3 text-muted-foreground" />
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>工具名称模式（支持正则表达式）。留空匹配所有工具。</p>
+                  <p>工具名称匹配模式（支持正则表达式）。留空匹配所有工具。</p>
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
@@ -556,10 +556,10 @@ export const HooksEditor: React.FC<HooksEditorProps> = ({
               disabled={readOnly}
             >
               <SelectTrigger className="w-40">
-                <SelectValue placeholder="Common patterns" />
+                <SelectValue placeholder="常用模式" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="custom">Custom</SelectItem>
+                <SelectItem value="custom">自定义</SelectItem>
                 {COMMON_TOOL_MATCHERS.map(pattern => (
                   <SelectItem key={pattern} value={pattern}>{pattern}</SelectItem>
                 ))}
@@ -754,10 +754,10 @@ export const HooksEditor: React.FC<HooksEditorProps> = ({
           {/* Header */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Hooks Configuration</h3>
+              <h3 className="text-lg font-semibold">钩子配置</h3>
               <div className="flex items-center gap-2">
                 <Badge variant={scope === 'project' ? 'secondary' : scope === 'local' ? 'outline' : 'default'}>
-                  {scope === 'project' ? 'Project' : scope === 'local' ? 'Local' : 'User'} Scope
+                  {scope === 'project' ? '项目' : scope === 'local' ? '本地' : '用户'} 范围
                 </Badge>
                 {!readOnly && (
                   <>
@@ -767,7 +767,7 @@ export const HooksEditor: React.FC<HooksEditorProps> = ({
                       onClick={() => setShowTemplateDialog(true)}
                     >
                       <FileText className="h-4 w-4 mr-2" />
-                      Templates
+                      模板
                     </Button>
                     {!hideActions && (
                       <Button
@@ -781,7 +781,7 @@ export const HooksEditor: React.FC<HooksEditorProps> = ({
                         ) : (
                           <Save className="h-4 w-4 mr-2" />
                         )}
-                        {isSaving ? "Saving..." : "Save"}
+                        {isSaving ? "保存中..." : "保存"}
                       </Button>
                     )}
                   </>
@@ -789,12 +789,12 @@ export const HooksEditor: React.FC<HooksEditorProps> = ({
               </div>
             </div>
             <p className="text-sm text-muted-foreground">
-              Configure shell commands to execute at various points in Claude Code's lifecycle.
-              {scope === 'local' && ' These settings are not committed to version control.'}
+              配置在 Claude Code 生命周期中各个节点执行的 Shell 命令。
+              {scope === 'local' && ' 这些设置不会提交到版本控制系统。'}
             </p>
             {hasUnsavedChanges && !readOnly && (
               <p className="text-sm text-amber-600">
-                You have unsaved changes. Click Save to persist them.
+                您有未保存的更改。请点击保存以持久化这些更改。
               </p>
             )}
           </div>
@@ -802,7 +802,7 @@ export const HooksEditor: React.FC<HooksEditorProps> = ({
           {/* Validation Messages */}
           {validationErrors.length > 0 && (
             <div className="p-3 bg-red-500/10 rounded-md space-y-1">
-              <p className="text-sm font-medium text-red-600">Validation Errors:</p>
+              <p className="text-sm font-medium text-red-600">验证错误：</p>
               {validationErrors.map((error, i) => (
                 <p key={i} className="text-xs text-red-600">• {error}</p>
               ))}
@@ -811,7 +811,7 @@ export const HooksEditor: React.FC<HooksEditorProps> = ({
 
           {validationWarnings.length > 0 && (
             <div className="p-3 bg-yellow-500/10 rounded-md space-y-1">
-              <p className="text-sm font-medium text-yellow-600">Security Warnings:</p>
+              <p className="text-sm font-medium text-yellow-600">安全警告：</p>
               {validationWarnings.map((warning, i) => (
                 <p key={i} className="text-xs text-yellow-600">• {warning}</p>
               ))}
@@ -857,11 +857,11 @@ export const HooksEditor: React.FC<HooksEditorProps> = ({
 
                   {items.length === 0 ? (
                     <Card className="p-8 text-center">
-                      <p className="text-muted-foreground mb-4">No hooks configured for this event</p>
+                      <p className="text-muted-foreground mb-4">此事件未配置钩子</p>
                       {!readOnly && (
                         <Button onClick={() => isMatcherEvent ? addMatcher(event) : addDirectCommand(event)}>
                           <Plus className="h-4 w-4 mr-2" />
-                          Add Hook
+                          添加钩子
                         </Button>
                       )}
                     </Card>
@@ -879,7 +879,7 @@ export const HooksEditor: React.FC<HooksEditorProps> = ({
                           className="w-full"
                         >
                           <Plus className="h-4 w-4 mr-2" />
-                          Add Another {isMatcherEvent ? 'Matcher' : 'Command'}
+                          添加另一个{isMatcherEvent ? '匹配器' : '命令'}
                         </Button>
                       )}
                     </div>
@@ -893,9 +893,9 @@ export const HooksEditor: React.FC<HooksEditorProps> = ({
           <Dialog open={showTemplateDialog} onOpenChange={setShowTemplateDialog}>
             <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
               <DialogHeader>
-                <DialogTitle>Hook Templates</DialogTitle>
+                <DialogTitle>钩子模板</DialogTitle>
                 <DialogDescription>
-                  Choose a pre-configured hook template to get started quickly
+                  选择预配置的钩子模板以快速开始
                 </DialogDescription>
               </DialogHeader>
               
@@ -914,7 +914,7 @@ export const HooksEditor: React.FC<HooksEditorProps> = ({
                       <p className="text-sm text-muted-foreground">{template.description}</p>
                       {matcherEvents.includes(template.event as any) && template.matcher && (
                         <p className="text-xs font-mono bg-muted px-2 py-1 rounded inline-block">
-                          Matcher: {template.matcher}
+                          匹配器: {template.matcher}
                         </p>
                       )}
                     </div>

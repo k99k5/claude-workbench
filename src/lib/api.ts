@@ -367,6 +367,7 @@ export interface ProviderConfig {
   api_key?: string;
   api_key_helper?: string;
   model?: string;
+  enable_auto_api_key_helper?: boolean;
 }
 
 /**
@@ -1593,6 +1594,18 @@ export const api = {
       return await invoke<string>("mcp_test_connection", { name });
     } catch (error) {
       console.error("Failed to test MCP connection:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Exports MCP server configuration from .claude.json
+   */
+  async mcpExportConfig(): Promise<string> {
+    try {
+      return await invoke<string>("mcp_export_config");
+    } catch (error) {
+      console.error("Failed to export MCP configuration:", error);
       throw error;
     }
   },

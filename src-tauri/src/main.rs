@@ -34,7 +34,7 @@ use commands::claude::{
     ClaudeProcessState,
 };
 use commands::mcp::{
-    mcp_add, mcp_add_from_claude_desktop, mcp_add_json, mcp_get, mcp_get_server_status, mcp_list,
+    mcp_add, mcp_add_from_claude_desktop, mcp_add_json, mcp_export_config, mcp_get, mcp_get_server_status, mcp_list,
     mcp_read_project_config, mcp_remove, mcp_reset_project_choices, mcp_save_project_config,
     mcp_serve, mcp_test_connection,
 };
@@ -224,6 +224,7 @@ fn main() {
             mcp_test_connection,
             mcp_reset_project_choices,
             mcp_get_server_status,
+            mcp_export_config,
             mcp_read_project_config,
             mcp_save_project_config,
 
