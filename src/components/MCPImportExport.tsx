@@ -369,8 +369,13 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
 {`{
   "mcpServers": {
     "filesystem": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed-dir"],
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "@modelcontextprotocol/server-filesystem", "C:\\\\path\\\\to\\\\allowed-dir"],
+      "env": {}
+    },
+    "context7": {
+      "command": "cmd", 
+      "args": ["/c", "npx", "-y", "@upstash/context7-mcp@latest"],
       "env": {}
     },
     "brave-search": {
@@ -394,8 +399,8 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
               <pre className="bg-background p-4 rounded-lg overflow-x-auto text-xs border">
 {`{
   "type": "stdio",
-  "command": "uvx",
-  "args": ["mcp-server-git", "--repository", "/path/to/repo"],
+  "command": "cmd",
+  "args": ["/c", "npx", "-y", "mcp-server-git", "--repository", "C:\\\\path\\\\to\\\\repo"],
   "env": {
     "GIT_AUTHOR_NAME": "Your Name"
   }
@@ -412,8 +417,9 @@ export const MCPImportExport: React.FC<MCPImportExportProps> = ({
                 <ul className="space-y-1 text-blue-600 dark:text-blue-400 text-xs">
                   <li>• <strong>Claude Desktop 格式</strong>：支持批量导入多个服务器</li>
                   <li>• <strong>单个服务器格式</strong>：导入时需要手动输入服务器名称</li>
+                  <li>• <strong>Windows 系统</strong>：npx 需要通过 <code>cmd /c</code> 调用，uvx 可直接调用</li>
+                  <li>• <strong>路径格式</strong>：Windows 路径需要使用双反斜杠转义（如 <code>C:\\\\path</code>）</li>
                   <li>• <strong>环境变量</strong>：可选，用于配置 API 密钥等敏感信息</li>
-                  <li>• <strong>命令参数</strong>：根据具体 MCP 服务器的要求配置</li>
                 </ul>
               </div>
             </div>
