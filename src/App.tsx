@@ -258,9 +258,13 @@ function App() {
    */
   const handleViewChange = (newView: View) => {
     // Check if we're navigating away from an active Claude session
-    if (view === "claude-code-session" && isClaudeStreaming && activeClaudeSessionId) {
-      const shouldLeave = window.confirm(t('common.claudeStillResponding'));
+    if (view === "claude-code-session") {
+      // 如果正在streaming，显示特殊警告；否则显示通用确认
+      const message = isClaudeStreaming && activeClaudeSessionId 
+        ? t('common.claudeStillResponding')
+        : '您确定要离开Claude会话吗？这可能会丢失当前的会话上下文。';
       
+      const shouldLeave = window.confirm(message);
       if (shouldLeave) {
         setView(newView);
       }
