@@ -238,7 +238,7 @@ pub async fn router_ccr_health_check() -> Result<bool, String> {
 
 /// [已废弃] 发送模型切换命令到Claude CLI
 /// 请使用 router_switch_model 进行统一的模型切换
-#[tauri::command]
+#[allow(dead_code)]
 #[deprecated(note = "请使用 router_switch_model 替代")]
 pub async fn router_send_model_command(
     _provider_name: String,

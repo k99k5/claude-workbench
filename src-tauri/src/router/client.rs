@@ -93,6 +93,7 @@ impl RouterProxyClient {
     }
     
     /// 获取可用的AI模型列表
+    #[allow(dead_code)]
     pub async fn get_available_models(&self) -> RouterResult<Vec<AIModel>> {
         let url = format!("{}/models", self.base_url);
         
@@ -193,6 +194,7 @@ impl RouterProxyClient {
     }
     
     /// 获取当前活跃的提供商和模型
+    #[allow(dead_code)]
     pub async fn get_active_model(&self) -> RouterResult<(String, String)> {
         let url = format!("{}/active-model", self.base_url);
         

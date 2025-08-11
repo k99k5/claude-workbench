@@ -677,7 +677,7 @@ dependencies = [
 
 [[package]]
 name = "claude-workbench"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -688,6 +688,7 @@ dependencies = [
  "futures",
  "glob",
  "image",
+ "lazy_static",
  "log",
  "regex",
  "reqwest",

@@ -42,6 +42,7 @@ use commands::mcp::{
 use commands::usage::{
     get_session_stats, get_usage_by_date_range, get_usage_details, get_usage_stats,
     get_today_usage_stats, get_usage_by_api_base_url, get_active_sessions, get_burn_rate_analysis,
+    get_usage_overview,
 };
 use commands::storage::{
     storage_list_tables, storage_read_table, storage_update_row, storage_delete_row,
@@ -63,7 +64,7 @@ use commands::router::{
     router_test_connection, router_route_claude_request, router_validate_config,
     router_sync_from_workbench, router_get_default_config, router_health_check,
     // 新的CCR集成命令
-    router_get_config_from_manager, router_get_models_from_config, router_ccr_health_check, router_send_model_command,
+    router_get_config_from_manager, router_get_models_from_config, router_ccr_health_check,
     router_discover_provider_models, router_update_provider_models,
     RouterManagerState,
 };
@@ -210,6 +211,7 @@ fn main() {
             
             // Usage & Analytics
             get_usage_stats,
+            get_usage_overview,
             get_today_usage_stats,
             get_usage_by_api_base_url,
             get_usage_by_date_range,
@@ -290,7 +292,6 @@ fn main() {
             router_get_config_from_manager,
             router_get_models_from_config,
             router_ccr_health_check,
-            router_send_model_command,
             router_discover_provider_models,
             router_update_provider_models,
             

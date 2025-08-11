@@ -5,11 +5,75 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::env;
+use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::command;
+
+#[derive(Debug, Clone)]
+struct UsageCacheEntry {
+    data: UsageStats,
+    timestamp: u64,
+    file_hash: String,
+}
+
+// 全局缓存 - 线程安全
+lazy_static::lazy_static! {
+    static ref USAGE_CACHE: Arc<Mutex<HashMap<String, UsageCacheEntry>>> = 
+        Arc::new(Mutex::new(HashMap::new()));
+}
+
+const CACHE_TTL_SECONDS: u64 = 300; // 5分钟缓存
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ClaudeSettings {
     env: Option<HashMap<String, serde_json::Value>>,
+}
+
+fn get_current_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
+fn get_directory_hash(claude_path: &PathBuf) -> Result<String, String> {
+    let projects_dir = claude_path.join("projects");
+    use std::hash::Hasher;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    
+    if let Ok(entries) = fs::read_dir(&projects_dir) {
+        let mut files: Vec<_> = entries
+            .flatten()
+            .filter_map(|entry| {
+                let path = entry.path();
+                if path.is_dir() {
+                    Some((path, entry.metadata().ok()?.modified().ok()?))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        
+        files.sort_by_key(|(path, _)| path.clone());
+        
+        for (path, modified) in files {
+            use std::hash::Hash;
+            path.hash(&mut hasher);
+            if let Ok(duration) = modified.duration_since(UNIX_EPOCH) {
+                duration.as_secs().hash(&mut hasher);
+            }
+        }
+    }
+    
+    Ok(format!("{:x}", hasher.finish()))
+}
+
+fn is_cache_valid(entry: &UsageCacheEntry, current_hash: &str) -> bool {
+    let current_time = get_current_timestamp();
+    let is_fresh = (current_time - entry.timestamp) < CACHE_TTL_SECONDS;
+    let hash_matches = entry.file_hash == current_hash;
+    
+    is_fresh && hash_matches
 }
 
 fn get_api_base_url() -> String {
@@ -52,7 +116,7 @@ pub struct UsageEntry {
     api_base_url: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UsageStats {
     total_cost: f64,
     total_tokens: u64,
@@ -67,7 +131,7 @@ pub struct UsageStats {
     by_api_base_url: Vec<ApiBaseUrlUsage>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ModelUsage {
     model: String,
     total_cost: f64,
@@ -79,7 +143,7 @@ pub struct ModelUsage {
     session_count: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DailyUsage {
     date: String,
     total_cost: f64,
@@ -87,7 +151,7 @@ pub struct DailyUsage {
     models_used: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ProjectUsage {
     project_path: String,
     project_name: String,
@@ -97,7 +161,7 @@ pub struct ProjectUsage {
     last_used: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ApiBaseUrlUsage {
     api_base_url: String,
     total_cost: f64,
@@ -388,6 +452,197 @@ fn get_earliest_timestamp(path: &PathBuf) -> Option<String> {
     None
 }
 
+fn get_all_usage_entries_optimized(claude_path: &PathBuf) -> Vec<UsageEntry> {
+    let mut all_entries = Vec::new();
+    let mut processed_hashes = HashSet::new();
+    let projects_dir = claude_path.join("projects");
+
+    // 使用 Vec 存储文件路径和修改时间，以便批量处理
+    let mut files_to_process: Vec<(PathBuf, String, SystemTime)> = Vec::new();
+
+    if let Ok(projects) = fs::read_dir(&projects_dir) {
+        for project in projects.flatten() {
+            if project.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                let project_name = project.file_name().to_string_lossy().to_string();
+                let project_path = project.path();
+
+                // 使用更高效的文件遍历
+                if let Ok(walker) = std::fs::read_dir(&project_path) {
+                    for entry in walker.flatten() {
+                        let path = entry.path();
+                        if path.extension().and_then(|s| s.to_str()) == Some("jsonl") {
+                            if let Ok(metadata) = entry.metadata() {
+                                if let Ok(modified) = metadata.modified() {
+                                    files_to_process.push((path, project_name.clone(), modified));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 按修改时间排序，优先处理最新文件
+    files_to_process.sort_by_key(|(_, _, modified)| std::cmp::Reverse(*modified));
+
+    // 批量处理文件，限制内存使用
+    const BATCH_SIZE: usize = 10;
+    for batch in files_to_process.chunks(BATCH_SIZE) {
+        for (path, project_name, _) in batch {
+            let entries = parse_jsonl_file_fast(path, project_name, &mut processed_hashes);
+            all_entries.extend(entries);
+            
+            // 每批处理后检查内存使用（简单限制）
+            if all_entries.len() > 50000 {
+                log::warn!("Usage entries limit reached, stopping early to prevent memory issues");
+                break;
+            }
+        }
+    }
+
+    // 只保留最近的条目排序（提升性能）
+    all_entries.sort_unstable_by(|a, b| b.timestamp.cmp(&a.timestamp));
+
+    all_entries
+}
+
+// 优化的JSON解析函数
+fn parse_jsonl_file_fast(
+    path: &PathBuf,
+    encoded_project_name: &str,
+    processed_hashes: &mut HashSet<String>,
+) -> Vec<UsageEntry> {
+    let mut entries = Vec::new();
+    let mut actual_project_path: Option<String> = None;
+
+    // 使用 BufReader 提升大文件读取性能
+    let file = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return entries,
+    };
+    
+    let reader = std::io::BufReader::new(file);
+    use std::io::BufRead;
+
+    // 提取session ID
+    let session_id = path
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let mut line_count = 0;
+    const MAX_LINES_PER_FILE: usize = 10000; // 限制单文件处理行数
+
+    for line_result in reader.lines() {
+        line_count += 1;
+        if line_count > MAX_LINES_PER_FILE {
+            log::warn!("File {} has too many lines, processing first {} lines only", 
+                path.display(), MAX_LINES_PER_FILE);
+            break;
+        }
+
+        let line = match line_result {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        // 快速JSON解析
+        let json_value: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        // 提取项目路径（只在第一次）
+        if actual_project_path.is_none() {
+            if let Some(cwd) = json_value.get("cwd").and_then(|v| v.as_str()) {
+                actual_project_path = Some(cwd.to_string());
+            }
+        }
+
+        // 快速解析usage数据
+        if let Some(message) = json_value.get("message") {
+            if let Some(usage) = message.get("usage") {
+                let input_tokens = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                let output_tokens = usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                let cache_creation_tokens = usage.get("cache_creation_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                let cache_read_tokens = usage.get("cache_read_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                
+                // 跳过无意义的条目
+                if input_tokens == 0 && output_tokens == 0 && cache_creation_tokens == 0 && cache_read_tokens == 0 {
+                    continue;
+                }
+
+                // 简化去重逻辑
+                if let Some(msg_id) = message.get("id").and_then(|v| v.as_str()) {
+                    let unique_hash = format!("{}:{}", session_id, msg_id);
+                    if processed_hashes.contains(&unique_hash) {
+                        continue;
+                    }
+                    processed_hashes.insert(unique_hash);
+                }
+
+                let model_str = message.get("model").and_then(|v| v.as_str()).unwrap_or("unknown");
+                
+                // 快速成本计算
+                let cost = if let Some(cost_usd) = json_value.get("costUSD").and_then(|v| v.as_f64()) {
+                    cost_usd
+                } else {
+                    calculate_cost_fast(model_str, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens)
+                };
+
+                let project_path = actual_project_path
+                    .clone()
+                    .unwrap_or_else(|| encoded_project_name.to_string());
+
+                entries.push(UsageEntry {
+                    timestamp: json_value.get("timestamp").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    model: model_str.to_string(),
+                    input_tokens,
+                    output_tokens,
+                    cache_creation_tokens,
+                    cache_read_tokens,
+                    cost,
+                    session_id: json_value.get("sessionId").and_then(|v| v.as_str()).unwrap_or(&session_id).to_string(),
+                    project_path,
+                    api_base_url: get_api_base_url(),
+                });
+            }
+        }
+    }
+
+    entries
+}
+
+// 优化的成本计算函数
+fn calculate_cost_fast(model: &str, input_tokens: u64, output_tokens: u64, cache_creation_tokens: u64, cache_read_tokens: u64) -> f64 {
+    let (input_price, output_price, cache_write_price, cache_read_price) = match model {
+        m if m.contains("opus-4") || m.contains("claude-opus-4") => 
+            (OPUS_4_INPUT_PRICE, OPUS_4_OUTPUT_PRICE, OPUS_4_CACHE_WRITE_PRICE, OPUS_4_CACHE_READ_PRICE),
+        m if m.contains("sonnet-4") || m.contains("claude-sonnet-4") => 
+            (SONNET_4_INPUT_PRICE, SONNET_4_OUTPUT_PRICE, SONNET_4_CACHE_WRITE_PRICE, SONNET_4_CACHE_READ_PRICE),
+        m if m.contains("sonnet-3.7") || m.contains("claude-sonnet-3.7") => 
+            (SONNET_37_INPUT_PRICE, SONNET_37_OUTPUT_PRICE, SONNET_37_CACHE_WRITE_PRICE, SONNET_37_CACHE_READ_PRICE),
+        m if m.contains("sonnet-3.5") || m.contains("claude-sonnet-3.5") => 
+            (SONNET_35_INPUT_PRICE, SONNET_35_OUTPUT_PRICE, SONNET_35_CACHE_WRITE_PRICE, SONNET_35_CACHE_READ_PRICE),
+        m if m.contains("haiku-3.5") || m.contains("claude-haiku-3.5") => 
+            (HAIKU_35_INPUT_PRICE, HAIKU_35_OUTPUT_PRICE, HAIKU_35_CACHE_WRITE_PRICE, HAIKU_35_CACHE_READ_PRICE),
+        _ => (0.0, 0.0, 0.0, 0.0),
+    };
+
+    // 直接计算，避免不必要的类型转换
+    ((input_tokens as f64 * input_price) +
+     (output_tokens as f64 * output_price) +
+     (cache_creation_tokens as f64 * cache_write_price) +
+     (cache_read_tokens as f64 * cache_read_price)) / 1_000_000.0
+}
+
 fn get_all_usage_entries(claude_path: &PathBuf) -> Vec<UsageEntry> {
     let mut all_entries = Vec::new();
     let mut processed_hashes = HashSet::new();
@@ -433,10 +688,27 @@ pub fn get_usage_stats(days: Option<u32>) -> Result<UsageStats, String> {
         .ok_or("Failed to get home directory")?
         .join(".claude");
 
-    let all_entries = get_all_usage_entries(&claude_path);
+    // 生成缓存键
+    let cache_key = format!("usage_stats_{}", days.unwrap_or(0));
+    
+    // 检查缓存
+    let current_hash = get_directory_hash(&claude_path)?;
+    
+    // 尝试从缓存获取
+    if let Ok(cache) = USAGE_CACHE.lock() {
+        if let Some(cached_entry) = cache.get(&cache_key) {
+            if is_cache_valid(cached_entry, &current_hash) {
+                log::debug!("Using cached usage stats for key: {}", cache_key);
+                return Ok(cached_entry.data.clone());
+            }
+        }
+    }
+
+    // 使用优化的数据获取函数
+    let all_entries = get_all_usage_entries_optimized(&claude_path);
 
     if all_entries.is_empty() {
-        return Ok(UsageStats {
+        let empty_stats = UsageStats {
             total_cost: 0.0,
             total_tokens: 0,
             total_input_tokens: 0,
@@ -448,7 +720,18 @@ pub fn get_usage_stats(days: Option<u32>) -> Result<UsageStats, String> {
             by_date: vec![],
             by_project: vec![],
             by_api_base_url: vec![],
-        });
+        };
+        
+        // 缓存空结果
+        if let Ok(mut cache) = USAGE_CACHE.lock() {
+            cache.insert(cache_key, UsageCacheEntry {
+                data: empty_stats.clone(),
+                timestamp: get_current_timestamp(),
+                file_hash: current_hash,
+            });
+        }
+        
+        return Ok(empty_stats);
     }
 
     // Filter by days if specified
@@ -468,174 +751,182 @@ pub fn get_usage_stats(days: Option<u32>) -> Result<UsageStats, String> {
         all_entries
     };
 
-    // Calculate aggregated stats
+    // 使用优化的统计计算
+    let stats = calculate_usage_stats_fast(&filtered_entries);
+    
+    // 缓存结果
+    if let Ok(mut cache) = USAGE_CACHE.lock() {
+        cache.insert(cache_key, UsageCacheEntry {
+            data: stats.clone(),
+            timestamp: get_current_timestamp(),
+            file_hash: current_hash,
+        });
+        
+        // 限制缓存大小
+        if cache.len() > 20 {
+            let mut keys_to_remove: Vec<String> = cache.keys().take(5).cloned().collect();
+            for key in keys_to_remove {
+                cache.remove(&key);
+            }
+        }
+    }
+
+    Ok(stats)
+}
+
+// 优化的统计计算函数
+fn calculate_usage_stats_fast(filtered_entries: &[UsageEntry]) -> UsageStats {
+    // 预分配容量以提升性能
+    let mut model_stats: HashMap<String, ModelUsage> = HashMap::with_capacity(10);
+    let mut daily_stats: HashMap<String, DailyUsage> = HashMap::with_capacity(100);
+    let mut project_stats: HashMap<String, ProjectUsage> = HashMap::with_capacity(50);
+    let mut api_base_url_stats: HashMap<String, ApiBaseUrlUsage> = HashMap::with_capacity(5);
+    
+    // 使用 HashSet 来跟踪唯一会话，预分配容量
+    let mut unique_sessions: HashSet<String> = HashSet::with_capacity(1000);
+    let mut model_sessions: HashMap<String, HashSet<String>> = HashMap::with_capacity(10);
+    let mut project_sessions: HashMap<String, HashSet<String>> = HashMap::with_capacity(50);
+    let mut api_sessions: HashMap<String, HashSet<String>> = HashMap::with_capacity(5);
+
     let mut total_cost = 0.0;
     let mut total_input_tokens = 0u64;
     let mut total_output_tokens = 0u64;
     let mut total_cache_creation_tokens = 0u64;
     let mut total_cache_read_tokens = 0u64;
 
-    let mut model_stats: HashMap<String, ModelUsage> = HashMap::new();
-    let mut daily_stats: HashMap<String, DailyUsage> = HashMap::new();
-    let mut project_stats: HashMap<String, ProjectUsage> = HashMap::new();
-    let mut api_base_url_stats: HashMap<String, ApiBaseUrlUsage> = HashMap::new();
-    
-    // Track unique sessions for accurate counting
-    let mut unique_sessions: HashSet<String> = HashSet::new();
-    let mut model_sessions: HashMap<String, HashSet<String>> = HashMap::new();
-    let mut project_sessions: HashMap<String, HashSet<String>> = HashMap::new();
-    let mut api_sessions: HashMap<String, HashSet<String>> = HashMap::new();
-
-    for entry in &filtered_entries {
-        // Update totals
+    for entry in filtered_entries {
+        // 累计总计
         total_cost += entry.cost;
         total_input_tokens += entry.input_tokens;
         total_output_tokens += entry.output_tokens;
         total_cache_creation_tokens += entry.cache_creation_tokens;
         total_cache_read_tokens += entry.cache_read_tokens;
 
-        // Track unique sessions
+        // 跟踪唯一会话
         unique_sessions.insert(entry.session_id.clone());
         
-        // Track sessions per model
+        // 模型会话跟踪
         model_sessions
             .entry(entry.model.clone())
-            .or_insert_with(HashSet::new)
+            .or_insert_with(|| HashSet::with_capacity(100))
             .insert(entry.session_id.clone());
             
-        // Track sessions per project
+        // 项目会话跟踪
         project_sessions
             .entry(entry.project_path.clone())
-            .or_insert_with(HashSet::new)
+            .or_insert_with(|| HashSet::with_capacity(50))
             .insert(entry.session_id.clone());
             
-        // Track sessions per API base URL
+        // API会话跟踪
         api_sessions
             .entry(entry.api_base_url.clone())
-            .or_insert_with(HashSet::new)
+            .or_insert_with(|| HashSet::with_capacity(10))
             .insert(entry.session_id.clone());
 
-        // Update model stats
-        let model_stat = model_stats
-            .entry(entry.model.clone())
-            .or_insert(ModelUsage {
-                model: entry.model.clone(),
-                total_cost: 0.0,
-                total_tokens: 0,
-                input_tokens: 0,
-                output_tokens: 0,
-                cache_creation_tokens: 0,
-                cache_read_tokens: 0,
-                session_count: 0,
-            });
+        // 更新模型统计
+        let model_stat = model_stats.entry(entry.model.clone()).or_insert_with(|| ModelUsage {
+            model: entry.model.clone(),
+            total_cost: 0.0,
+            total_tokens: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            session_count: 0,
+        });
+        
         model_stat.total_cost += entry.cost;
         model_stat.input_tokens += entry.input_tokens;
         model_stat.output_tokens += entry.output_tokens;
         model_stat.cache_creation_tokens += entry.cache_creation_tokens;
         model_stat.cache_read_tokens += entry.cache_read_tokens;
-        model_stat.total_tokens = model_stat.input_tokens + model_stat.output_tokens + model_stat.cache_creation_tokens + model_stat.cache_read_tokens;
-        // Session count will be set later from unique session tracking
+        model_stat.total_tokens = model_stat.input_tokens + model_stat.output_tokens 
+            + model_stat.cache_creation_tokens + model_stat.cache_read_tokens;
 
-        // Update daily stats
-        let date = entry
-            .timestamp
-            .split('T')
-            .next()
-            .unwrap_or(&entry.timestamp)
-            .to_string();
-        let daily_stat = daily_stats.entry(date.clone()).or_insert(DailyUsage {
+        // 更新日统计
+        let date = entry.timestamp.split('T').next().unwrap_or(&entry.timestamp).to_string();
+        let daily_stat = daily_stats.entry(date.clone()).or_insert_with(|| DailyUsage {
             date,
             total_cost: 0.0,
             total_tokens: 0,
-            models_used: vec![],
+            models_used: Vec::with_capacity(5),
         });
+        
         daily_stat.total_cost += entry.cost;
-        daily_stat.total_tokens += entry.input_tokens
-            + entry.output_tokens
-            + entry.cache_creation_tokens
-            + entry.cache_read_tokens;
+        daily_stat.total_tokens += entry.input_tokens + entry.output_tokens 
+            + entry.cache_creation_tokens + entry.cache_read_tokens;
+            
         if !daily_stat.models_used.contains(&entry.model) {
             daily_stat.models_used.push(entry.model.clone());
         }
 
-        // Update project stats
-        let project_stat =
-            project_stats
-                .entry(entry.project_path.clone())
-                .or_insert(ProjectUsage {
-                    project_path: entry.project_path.clone(),
-                    project_name: entry
-                        .project_path
-                        .split('/')
-                        .last()
-                        .unwrap_or(&entry.project_path)
-                        .to_string(),
-                    total_cost: 0.0,
-                    total_tokens: 0,
-                    session_count: 0,
-                    last_used: entry.timestamp.clone(),
-                });
+        // 更新项目统计
+        let project_name = entry.project_path.split('/').last().unwrap_or(&entry.project_path).to_string();
+        let project_stat = project_stats.entry(entry.project_path.clone()).or_insert_with(|| ProjectUsage {
+            project_path: entry.project_path.clone(),
+            project_name,
+            total_cost: 0.0,
+            total_tokens: 0,
+            session_count: 0,
+            last_used: entry.timestamp.clone(),
+        });
+        
         project_stat.total_cost += entry.cost;
-        project_stat.total_tokens += entry.input_tokens
-            + entry.output_tokens
-            + entry.cache_creation_tokens
-            + entry.cache_read_tokens;
-        // Session count will be set later from unique session tracking
+        project_stat.total_tokens += entry.input_tokens + entry.output_tokens 
+            + entry.cache_creation_tokens + entry.cache_read_tokens;
+            
         if entry.timestamp > project_stat.last_used {
             project_stat.last_used = entry.timestamp.clone();
         }
 
-        // Update API base URL stats
-        let api_base_url_stat = api_base_url_stats
-            .entry(entry.api_base_url.clone())
-            .or_insert(ApiBaseUrlUsage {
-                api_base_url: entry.api_base_url.clone(),
-                total_cost: 0.0,
-                total_tokens: 0,
-                input_tokens: 0,
-                output_tokens: 0,
-                cache_creation_tokens: 0,
-                cache_read_tokens: 0,
-                session_count: 0,
-            });
-        api_base_url_stat.total_cost += entry.cost;
-        api_base_url_stat.input_tokens += entry.input_tokens;
-        api_base_url_stat.output_tokens += entry.output_tokens;
-        api_base_url_stat.cache_creation_tokens += entry.cache_creation_tokens;
-        api_base_url_stat.cache_read_tokens += entry.cache_read_tokens;
-        api_base_url_stat.total_tokens = api_base_url_stat.input_tokens + api_base_url_stat.output_tokens + api_base_url_stat.cache_creation_tokens + api_base_url_stat.cache_read_tokens;
-        // Session count will be set later from unique session tracking
+        // 更新API URL统计
+        let api_stat = api_base_url_stats.entry(entry.api_base_url.clone()).or_insert_with(|| ApiBaseUrlUsage {
+            api_base_url: entry.api_base_url.clone(),
+            total_cost: 0.0,
+            total_tokens: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            session_count: 0,
+        });
+        
+        api_stat.total_cost += entry.cost;
+        api_stat.input_tokens += entry.input_tokens;
+        api_stat.output_tokens += entry.output_tokens;
+        api_stat.cache_creation_tokens += entry.cache_creation_tokens;
+        api_stat.cache_read_tokens += entry.cache_read_tokens;
+        api_stat.total_tokens = api_stat.input_tokens + api_stat.output_tokens 
+            + api_stat.cache_creation_tokens + api_stat.cache_read_tokens;
     }
 
-    let total_tokens = total_input_tokens
-        + total_output_tokens
-        + total_cache_creation_tokens
-        + total_cache_read_tokens;
+    let total_tokens = total_input_tokens + total_output_tokens 
+        + total_cache_creation_tokens + total_cache_read_tokens;
     let total_sessions = unique_sessions.len() as u64;
 
-    // Set correct session counts and convert hashmaps to sorted vectors
+    // 设置会话计数并转换为已排序的向量
     let mut by_model: Vec<ModelUsage> = model_stats.into_iter().map(|(model, mut stat)| {
         stat.session_count = model_sessions.get(&model).map(|s| s.len()).unwrap_or(0) as u64;
         stat
     }).collect();
-    by_model.sort_by(|a, b| b.total_cost.partial_cmp(&a.total_cost).unwrap());
+    by_model.sort_unstable_by(|a, b| b.total_cost.partial_cmp(&a.total_cost).unwrap());
 
     let mut by_date: Vec<DailyUsage> = daily_stats.into_values().collect();
-    by_date.sort_by(|a, b| b.date.cmp(&a.date));
+    by_date.sort_unstable_by(|a, b| b.date.cmp(&a.date));
 
     let mut by_project: Vec<ProjectUsage> = project_stats.into_iter().map(|(project_path, mut stat)| {
         stat.session_count = project_sessions.get(&project_path).map(|s| s.len()).unwrap_or(0) as u64;
         stat
     }).collect();
-    by_project.sort_by(|a, b| b.total_cost.partial_cmp(&a.total_cost).unwrap());
+    by_project.sort_unstable_by(|a, b| b.total_cost.partial_cmp(&a.total_cost).unwrap());
 
     let mut by_api_base_url: Vec<ApiBaseUrlUsage> = api_base_url_stats.into_iter().map(|(api_url, mut stat)| {
         stat.session_count = api_sessions.get(&api_url).map(|s| s.len()).unwrap_or(0) as u64;
         stat
     }).collect();
-    by_api_base_url.sort_by(|a, b| b.total_cost.partial_cmp(&a.total_cost).unwrap());
+    by_api_base_url.sort_unstable_by(|a, b| b.total_cost.partial_cmp(&a.total_cost).unwrap());
 
-    Ok(UsageStats {
+    UsageStats {
         total_cost,
         total_tokens,
         total_input_tokens,
@@ -647,7 +938,175 @@ pub fn get_usage_stats(days: Option<u32>) -> Result<UsageStats, String> {
         by_date,
         by_project,
         by_api_base_url,
+    }
+}
+
+// 分页统计数据结构
+#[derive(Debug, Serialize)]
+pub struct PaginatedUsageStats {
+    total_cost: f64,
+    total_tokens: u64,
+    total_input_tokens: u64,
+    total_output_tokens: u64,
+    total_cache_creation_tokens: u64,
+    total_cache_read_tokens: u64,
+    total_sessions: u64,
+    // 分页数据
+    by_model: PaginatedData<ModelUsage>,
+    by_project: PaginatedData<ProjectUsage>,
+    by_api_base_url: PaginatedData<ApiBaseUrlUsage>,
+    by_date: Vec<DailyUsage>, // 日期数据通常不多，不需要分页
+}
+
+#[derive(Debug, Serialize)]
+pub struct PaginatedData<T> {
+    data: Vec<T>,
+    total_count: usize,
+    page: usize,
+    page_size: usize,
+    has_more: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UsageOverview {
+    total_cost: f64,
+    total_sessions: u64,
+    total_tokens: u64,
+    today_cost: f64,
+    week_cost: f64,
+    top_model: Option<String>,
+    top_project: Option<String>,
+}
+
+// 快速概览统计（加载速度最快）
+#[command]
+pub fn get_usage_overview() -> Result<UsageOverview, String> {
+    let claude_path = dirs::home_dir()
+        .ok_or("Failed to get home directory")?
+        .join(".claude");
+
+    // 只加载最近的数据进行概览统计
+    let recent_entries = get_recent_usage_entries(&claude_path, 1000)?; // 最多1000条记录
+    
+    if recent_entries.is_empty() {
+        return Ok(UsageOverview {
+            total_cost: 0.0,
+            total_sessions: 0,
+            total_tokens: 0,
+            today_cost: 0.0,
+            week_cost: 0.0,
+            top_model: None,
+            top_project: None,
+        });
+    }
+
+    let now = Local::now();
+    let today = now.date_naive();
+    let week_ago = now.date_naive() - chrono::Duration::days(7);
+
+    let mut total_cost = 0.0;
+    let mut total_tokens = 0u64;
+    let mut today_cost = 0.0;
+    let mut week_cost = 0.0;
+    let mut unique_sessions = HashSet::new();
+    let mut model_costs: HashMap<String, f64> = HashMap::new();
+    let mut project_costs: HashMap<String, f64> = HashMap::new();
+
+    for entry in &recent_entries {
+        total_cost += entry.cost;
+        total_tokens += entry.input_tokens + entry.output_tokens + 
+                       entry.cache_creation_tokens + entry.cache_read_tokens;
+        unique_sessions.insert(entry.session_id.clone());
+        
+        *model_costs.entry(entry.model.clone()).or_insert(0.0) += entry.cost;
+        *project_costs.entry(entry.project_path.clone()).or_insert(0.0) += entry.cost;
+
+        if let Ok(dt) = DateTime::parse_from_rfc3339(&entry.timestamp) {
+            let date = dt.date_naive();
+            if date == today {
+                today_cost += entry.cost;
+            }
+            if date >= week_ago {
+                week_cost += entry.cost;
+            }
+        }
+    }
+
+    let top_model = model_costs.into_iter()
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+        .map(|(model, _)| model);
+
+    let top_project = project_costs.into_iter()
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+        .map(|(project, _)| project);
+
+    Ok(UsageOverview {
+        total_cost,
+        total_sessions: unique_sessions.len() as u64,
+        total_tokens,
+        today_cost,
+        week_cost,
+        top_model,
+        top_project,
     })
+}
+
+// 获取最近的usage entries（限制数量）
+fn get_recent_usage_entries(claude_path: &PathBuf, limit: usize) -> Result<Vec<UsageEntry>, String> {
+    let mut all_entries = Vec::with_capacity(limit);
+    let mut processed_hashes = HashSet::new();
+    let projects_dir = claude_path.join("projects");
+
+    if !projects_dir.exists() {
+        return Ok(all_entries);
+    }
+
+    // 获取所有JSONL文件并按修改时间排序
+    let mut files_with_time: Vec<(PathBuf, String, SystemTime)> = Vec::new();
+
+    if let Ok(projects) = fs::read_dir(&projects_dir) {
+        for project in projects.flatten() {
+            if project.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                let project_name = project.file_name().to_string_lossy().to_string();
+                let project_path = project.path();
+
+                if let Ok(walker) = std::fs::read_dir(&project_path) {
+                    for entry in walker.flatten() {
+                        let path = entry.path();
+                        if path.extension().and_then(|s| s.to_str()) == Some("jsonl") {
+                            if let Ok(metadata) = entry.metadata() {
+                                if let Ok(modified) = metadata.modified() {
+                                    files_with_time.push((path, project_name.clone(), modified));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 按修改时间倒序排序，优先处理最新文件
+    files_with_time.sort_by_key(|(_, _, modified)| std::cmp::Reverse(*modified));
+
+    // 只处理最新的几个文件
+    let files_to_process = files_with_time.into_iter().take(20); // 最多20个最新文件
+
+    for (path, project_name, _) in files_to_process {
+        let entries = parse_jsonl_file_fast(&path, &project_name, &mut processed_hashes);
+        all_entries.extend(entries);
+        
+        // 如果达到限制，停止处理
+        if all_entries.len() >= limit {
+            break;
+        }
+    }
+
+    // 按时间倒序排序并截取
+    all_entries.sort_unstable_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    all_entries.truncate(limit);
+
+    Ok(all_entries)
 }
 
 #[command]

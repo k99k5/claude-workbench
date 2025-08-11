@@ -1,6 +1,6 @@
 [package]
 name = "claude-workbench"
-version = "1.0.0"
+version = "2.0.0"
 description = "Claude Workbench - Professional desktop application and toolkit for Claude CLI"
 authors = ["mufeedvh", "123vviekr"]
 license = "AGPL-3.0"
@@ -37,6 +37,7 @@ anyhow = "1"
 log = "0.4"
 env_logger = "0.11"
 regex = "1"
+lazy_static = "1.4"
 glob = "0.3"
 base64 = "0.22"
 reqwest = { version = "0.12", features = ["json"] }

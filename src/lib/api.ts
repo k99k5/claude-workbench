@@ -248,6 +248,16 @@ export interface UsageStats {
   by_api_base_url?: ApiBaseUrlUsage[];
 }
 
+export interface UsageOverview {
+  total_cost: number;
+  total_sessions: number;
+  total_tokens: number;
+  today_cost: number;
+  week_cost: number;
+  top_model?: string;
+  top_project?: string;
+}
+
 /**
  * Represents a checkpoint in the session timeline
  */
@@ -1158,6 +1168,18 @@ export const api = {
       return await invoke<UsageStats>("get_usage_stats");
     } catch (error) {
       console.error("Failed to get usage stats:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Get usage overview statistics - fast loading with essential metrics only
+   */
+  async getUsageOverview(): Promise<UsageOverview> {
+    try {
+      return await invoke<UsageOverview>("get_usage_overview");
+    } catch (error) {
+      console.error("Failed to get usage overview:", error);
       throw error;
     }
   },
