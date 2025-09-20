@@ -24,6 +24,10 @@ pub struct CurrentConfig {
     pub anthropic_api_key: Option<String>,
     pub anthropic_api_key_helper: Option<String>,
     pub anthropic_model: Option<String>,
+    // Claude Code 2025 新增字段
+    pub anthropic_small_fast_model: Option<String>,
+    pub api_timeout_ms: Option<String>,
+    pub claude_code_disable_nonessential_traffic: Option<String>,
 }
 
 // 获取Claude设置文件路径
@@ -221,6 +225,16 @@ pub fn get_current_provider_config() -> Result<CurrentConfig, String> {
         anthropic_model: env_vars.get("ANTHROPIC_MODEL")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
+        // Claude Code 2025 新增字段
+        anthropic_small_fast_model: env_vars.get("ANTHROPIC_SMALL_FAST_MODEL")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        api_timeout_ms: env_vars.get("API_TIMEOUT_MS")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        claude_code_disable_nonessential_traffic: env_vars.get("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
     })
 }
 
@@ -228,7 +242,10 @@ pub fn get_current_provider_config() -> Result<CurrentConfig, String> {
 #[command]
 pub async fn switch_provider_config(_app: AppHandle, config: ProviderConfig) -> Result<String, String> {
     log::info!("开始切换代理商配置: {} - {}", config.name, config.description);
-    
+
+    // 验证第三方API配置
+    validate_third_party_config(&config)?;
+
     let mut settings = load_settings()?;
     
     // 确保env字段存在
@@ -249,6 +266,11 @@ pub async fn switch_provider_config(_app: AppHandle, config: ProviderConfig) -> 
     env_obj.remove("ANTHROPIC_AUTH_TOKEN");
     env_obj.remove("ANTHROPIC_BASE_URL");
     env_obj.remove("ANTHROPIC_MODEL");
+
+    // 清理Claude Code 2025的新环境变量
+    env_obj.remove("ANTHROPIC_SMALL_FAST_MODEL");
+    env_obj.remove("API_TIMEOUT_MS");
+    env_obj.remove("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC");
     
     // 设置新的环境变量
     env_obj.insert("ANTHROPIC_BASE_URL".to_string(), serde_json::Value::String(config.base_url.clone()));
@@ -276,7 +298,23 @@ pub async fn switch_provider_config(_app: AppHandle, config: ProviderConfig) -> 
             env_obj.insert("ANTHROPIC_MODEL".to_string(), serde_json::Value::String(model.clone()));
         }
     }
-    
+
+    // 添加Claude Code 2025的��准环境变量
+    // 为第三方API优化超时设置
+    if config.base_url != "https://api.anthropic.com" {
+        env_obj.insert("API_TIMEOUT_MS".to_string(), serde_json::Value::String("600000".to_string()));
+        env_obj.insert("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(), serde_json::Value::String("1".to_string()));
+        log::info!("设置第三方API优化参数: timeout=600s, disable_nonessential_traffic=true");
+    }
+
+    // 设置小型快速模型（用于代码完成等任务）
+    if let Some(model) = &config.model {
+        if !model.is_empty() {
+            // 对于第三方API，通常使用同一个模型作为fast model
+            env_obj.insert("ANTHROPIC_SMALL_FAST_MODEL".to_string(), serde_json::Value::String(model.clone()));
+        }
+    }
+
     // apiKeyHelper 根据用户勾选状态决定是否自动生成
     if config.enable_auto_api_key_helper.unwrap_or(false) {
         if let Some(token) = auth_token {
@@ -303,6 +341,35 @@ pub async fn switch_provider_config(_app: AppHandle, config: ProviderConfig) -> 
         config.name, 
         config.description
     ))
+}
+
+// 验证第三方API配置的兼容性（Claude Code 2025标准）
+fn validate_third_party_config(config: &ProviderConfig) -> Result<(), String> {
+    // 检查是否为第三方API
+    if config.base_url != "https://api.anthropic.com" {
+        // 确保有认证信息
+        if config.auth_token.is_none() && config.api_key.is_none() {
+            return Err("第三方API需要设置认证令牌或API密钥".to_string());
+        }
+
+        // 确保模型名称兼容
+        if let Some(model) = &config.model {
+            if model.is_empty() {
+                return Err("第三方API需要指定模型名称".to_string());
+            }
+
+            // 检查常见的模型名称格式
+            if !model.contains("claude") && !model.contains("gpt") && !model.contains("gemini") && !model.contains("deepseek") {
+                log::warn!("模型名称格式可能不兼容: {}", model);
+            }
+        } else {
+            return Err("第三方API必须指定模型名称".to_string());
+        }
+
+        log::info!("第三方API配置验证通过: {} - {}", config.name, config.base_url);
+    }
+
+    Ok(())
 }
 
 // 清理代理商配置（清理settings.json的env字段中的ANTHROPIC变量和apiKeyHelper字段）
