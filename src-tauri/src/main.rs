@@ -5,7 +5,6 @@ mod checkpoint;
 mod claude_binary;
 mod commands;
 mod process;
-mod router;
 
 use checkpoint::state::CheckpointState;
 use commands::agents::{
@@ -59,22 +58,6 @@ use commands::provider::{
     clear_provider_config, test_provider_connection, add_provider_config,
     update_provider_config, delete_provider_config, get_provider_config,
 };
-use commands::router::{
-    router_init, router_get_config, router_update_config, router_get_routing_mode,
-    router_set_routing_mode, router_start_process, router_init_manager, router_stop_process,
-    router_restart_process, router_is_running, router_get_process_id, router_get_available_models,
-    router_switch_model, router_get_active_model, router_get_stats, router_reset_stats,
-    router_test_connection, router_route_claude_request, router_validate_config,
-    router_sync_from_workbench, router_get_default_config, router_health_check,
-    // 新的CCR集成命令
-    router_get_config_from_manager, router_get_models_from_config, router_ccr_health_check,
-    router_discover_provider_models, router_update_provider_models,
-    RouterManagerState,
-};
-use commands::router_dynamic_rules::{
-    router_get_dynamic_rules, router_add_dynamic_rule, router_update_dynamic_rule,
-    router_delete_dynamic_rule, router_match_dynamic_rule,
-};
 use process::ProcessRegistryState;
 use std::sync::Mutex;
 use tauri::Manager;
@@ -120,8 +103,6 @@ fn main() {
             // Initialize Claude process state
             app.manage(ClaudeProcessState::default());
 
-            // Initialize Router manager state
-            app.manage(RouterManagerState::default());
 
 
             Ok(())
@@ -276,44 +257,6 @@ fn main() {
             update_provider_config,
             delete_provider_config,
             get_provider_config,
-            
-            // Router Management
-            router_init,
-            router_get_config,
-            router_update_config,
-            router_get_routing_mode,
-            router_set_routing_mode,
-            router_get_default_config,
-            router_start_process,
-            router_init_manager,
-            router_stop_process,
-            router_restart_process,
-            router_is_running,
-            router_get_process_id,
-            router_get_available_models,
-            router_switch_model,
-            router_get_active_model,
-            router_get_stats,
-            router_reset_stats,
-            router_test_connection,
-            router_route_claude_request,
-            router_validate_config,
-            router_sync_from_workbench,
-            router_health_check,
-            
-            // CCR 集成命令
-            router_get_config_from_manager,
-            router_get_models_from_config,
-            router_ccr_health_check,
-            router_discover_provider_models,
-            router_update_provider_models,
-            
-            // 动态路由规则命令
-            router_get_dynamic_rules,
-            router_add_dynamic_rule,
-            router_update_dynamic_rule,
-            router_delete_dynamic_rule,
-            router_match_dynamic_rule,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

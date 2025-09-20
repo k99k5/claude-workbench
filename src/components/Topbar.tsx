@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import { motion } from "framer-motion";
-import { FileText, Settings, BarChart3, Network, Route } from "lucide-react";
+import { FileText, Settings, BarChart3, Network } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ClaudeStatusIndicator } from "@/components/ClaudeStatusIndicator";
 import { cn } from "@/lib/utils";
@@ -24,10 +24,6 @@ interface TopbarProps {
    */
   onMCPClick: () => void;
   /**
-   * Callback when Router is clicked
-   */
-  onRouterClick: () => void;
-  /**
    * Optional className for styling
    */
   className?: string;
@@ -49,7 +45,6 @@ export const Topbar: React.FC<TopbarProps> = ({
   onSettingsClick,
   onUsageClick,
   onMCPClick,
-  onRouterClick,
   className,
 }) => {
   const { t } = useTranslation();
@@ -105,15 +100,6 @@ export const Topbar: React.FC<TopbarProps> = ({
           {t('navigation.mcpManager')}
         </Button>
         
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onRouterClick}
-          className="text-xs"
-        >
-          <Route className="mr-2 h-3 w-3" />
-          智能路由
-        </Button>
         
         <Button
           variant="ghost"

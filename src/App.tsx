@@ -21,15 +21,14 @@ import { ClaudeBinaryDialog } from "@/components/ClaudeBinaryDialog";
 import { Toast, ToastContainer } from "@/components/ui/toast";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ProjectSettings } from '@/components/ProjectSettings';
-import { RouterDashboard } from '@/components/RouterDashboard';
 import { useTranslation } from '@/hooks/useTranslation';
 
-type View = 
-  | "welcome" 
-  | "projects" 
-  | "editor" 
-  | "claude-file-editor" 
-  | "claude-code-session" 
+type View =
+  | "welcome"
+  | "projects"
+  | "editor"
+  | "claude-file-editor"
+  | "claude-code-session"
   | "settings"
   | "cc-agents"
   | "create-agent"
@@ -38,8 +37,7 @@ type View =
   | "agent-run-view"
   | "mcp"
   | "usage-dashboard"
-  | "project-settings"
-  | "router";
+  | "project-settings";
 
 /**
  * 主应用组件 - 管理 Claude 目录浏览器界面
@@ -579,30 +577,6 @@ function App() {
         }
         break;
       
-      case "router":
-        return (
-          <div className="h-full bg-background">
-            <div className="container mx-auto p-6">
-              <div className="mb-6">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleViewChange("welcome")}
-                  className="mb-4"
-                >
-                  {t('common.backToHome')}
-                </Button>
-                <div className="mb-4">
-                  <h1 className="text-3xl font-bold tracking-tight">智能路由控制台</h1>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    管理和监控claude-code-router智能路由系统
-                  </p>
-                </div>
-              </div>
-              <RouterDashboard />
-            </div>
-          </div>
-        );
       
       default:
         return null;
@@ -618,7 +592,6 @@ function App() {
             onSettingsClick={() => handleViewChange("settings")}
             onUsageClick={() => handleViewChange("usage-dashboard")}
             onMCPClick={() => handleViewChange("mcp")}
-            onRouterClick={() => handleViewChange("router")}
           />
           
           {/* Main Content */}
