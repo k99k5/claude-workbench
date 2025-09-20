@@ -416,7 +416,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     }
     
     // Clean up previous listeners
-    unlistenRefs.current.forEach(unlisten => unlisten());
+    unlistenRefs.current.forEach(unlisten => unlisten && typeof unlisten === 'function' && unlisten());
     unlistenRefs.current = [];
     
     // IMPORTANT: Set the session ID before setting up listeners
@@ -534,7 +534,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       // Only clean up and set up new listeners if not already listening
       if (!isListeningRef.current) {
         // Clean up previous listeners
-        unlistenRefs.current.forEach(unlisten => unlisten());
+        unlistenRefs.current.forEach(unlisten => unlisten && typeof unlisten === 'function' && unlisten());
         unlistenRefs.current = [];
         
         // Mark as setting up listeners
@@ -576,7 +576,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           });
 
           // Replace existing unlisten refs with these new ones (after cleaning up)
-          unlistenRefs.current.forEach((u) => u());
+          unlistenRefs.current.forEach((u) => u && typeof u === 'function' && u());
           unlistenRefs.current = [specificOutputUnlisten, specificErrorUnlisten, specificCompleteUnlisten];
         };
 
@@ -905,7 +905,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       await api.cancelClaudeExecution(claudeSessionId);
       
       // Clean up listeners
-      unlistenRefs.current.forEach(unlisten => unlisten());
+      unlistenRefs.current.forEach(unlisten => unlisten && typeof unlisten === 'function' && unlisten());
       unlistenRefs.current = [];
       
       // Reset states
@@ -944,7 +944,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       setMessages(prev => [...prev, errorMessage]);
       
       // Clean up listeners anyway
-      unlistenRefs.current.forEach(unlisten => unlisten());
+      unlistenRefs.current.forEach(unlisten => unlisten && typeof unlisten === 'function' && unlisten());
       unlistenRefs.current = [];
       
       // Reset states to allow user to continue
@@ -1032,7 +1032,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       isListeningRef.current = false;
       
       // Clean up listeners
-      unlistenRefs.current.forEach(unlisten => unlisten());
+      unlistenRefs.current.forEach(unlisten => unlisten && typeof unlisten === 'function' && unlisten());
       unlistenRefs.current = [];
       
       // Reset session state on unmount
