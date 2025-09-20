@@ -94,7 +94,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const [forkSessionName, setForkSessionName] = useState("");
   
   // Queued prompts state
-  const [queuedPrompts, setQueuedPrompts] = useState<Array<{ id: string; prompt: string; model: "sonnet" | "opus" }>>([]);
+  const [queuedPrompts, setQueuedPrompts] = useState<Array<{ id: string; prompt: string; model: "sonnet" | "opus" | "sonnet1m" }>>([]);
   
   
   // New state for preview feature
@@ -118,10 +118,10 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const unlistenRefs = useRef<UnlistenFn[]>([]);
   const hasActiveSessionRef = useRef(false);
   const floatingPromptRef = useRef<FloatingPromptInputRef>(null);
-  const queuedPromptsRef = useRef<Array<{ id: string; prompt: string; model: "sonnet" | "opus" }>>([]);
+  const queuedPromptsRef = useRef<Array<{ id: string; prompt: string; model: "sonnet" | "opus" | "sonnet1m" }>>([]);
   const isMountedRef = useRef(true);
   const isListeningRef = useRef(false);
-  const handleSendPromptRef = useRef<((prompt: string, model: "sonnet" | "opus") => Promise<void>) | null>(null);
+  const handleSendPromptRef = useRef<((prompt: string, model: "sonnet" | "opus" | "sonnet1m") => Promise<void>) | null>(null);
 
   // Keep ref in sync with state
   useEffect(() => {
@@ -488,7 +488,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
 
   // Smart model selection for Default mode
 
-  const handleSendPrompt = async (prompt: string, model: "sonnet" | "opus") => {
+  const handleSendPrompt = async (prompt: string, model: "sonnet" | "opus" | "sonnet1m") => {
     console.log('[ClaudeCodeSession] handleSendPrompt called with:', { prompt, model, projectPath, claudeSessionId, effectiveSession });
     
     if (!projectPath) {
@@ -582,7 +582,10 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
 
         // Generic listeners (catch-all)
         const genericOutputUnlisten = await listen<string>('claude-output', async (event) => {
-          handleStreamMessage(event.payload);
+          // Only handle generic events if we don't have session-specific listeners active
+          if (!currentSessionId) {
+            handleStreamMessage(event.payload);
+          }
 
           // Attempt to extract session_id on the fly (for the very first init)
           try {
@@ -1399,7 +1402,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-xs font-medium text-muted-foreground">#{index + 1}</span>
                           <span className="text-xs px-1.5 py-0.5 bg-primary/10 text-primary rounded">
-                            {queuedPrompt.model === "opus" ? "Opus" : "Sonnet"}
+                            {queuedPrompt.model === "opus" ? "Opus" : queuedPrompt.model === "sonnet1m" ? "Sonnet 1M" : "Sonnet"}
                           </span>
                         </div>
                         <p className="text-sm line-clamp-2 break-words">{queuedPrompt.prompt}</p>

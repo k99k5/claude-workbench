@@ -1,5 +1,9 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use super::permission_config::{
+    ClaudePermissionConfig, ClaudeExecutionConfig, PermissionMode,
+    build_execution_args, DEVELOPMENT_TOOLS, SAFE_TOOLS, ALL_TOOLS
+};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -26,6 +30,18 @@ impl Default for ClaudeProcessState {
         Self {
             current_process: Arc::new(Mutex::new(None)),
         }
+    }
+}
+
+/// Maps frontend model IDs to Claude CLI model aliases
+/// Converts frontend-friendly model names to official Claude Code model identifiers
+fn map_model_to_claude_alias(model: &str) -> String {
+    match model {
+        "sonnet1m" => "sonnet[1m]".to_string(),
+        "sonnet" => "sonnet".to_string(),
+        "opus" => "opus".to_string(),
+        // Pass through any other model names unchanged (for future compatibility)
+        _ => model.to_string(),
     }
 }
 
@@ -1473,35 +1489,21 @@ pub async fn execute_claude_code(
 
     let claude_path = find_claude_binary(&app)?;
     
+    // 获取当前执行配置
+    let execution_config = get_claude_execution_config(app.clone()).await
+        .unwrap_or_else(|e| {
+            log::warn!("Failed to load execution config, using default: {}", e);
+            ClaudeExecutionConfig::default()
+        });
     
-    // Escape prompt for command line - handle multiline content properly
-    let escaped_prompt = escape_prompt_for_cli(&prompt);
+    log::info!("Using execution config: permissions_mode={:?}, dangerous_skip={}", 
+        execution_config.permissions.permission_mode,
+        execution_config.permissions.enable_dangerous_skip
+    );
     
-    // Build arguments based on whether it's a slash command
-    let args = if prompt.trim().starts_with('/') {
-        // For slash commands, use the --prompt flag explicitly
-        vec![
-            "--prompt".to_string(),
-            escaped_prompt,
-            "--model".to_string(),
-            model.clone(),
-            "--output-format".to_string(),
-            "stream-json".to_string(),
-            "--verbose".to_string(),
-            "--dangerously-skip-permissions".to_string(),
-        ]
-    } else {
-        // For regular prompts, pass as positional argument
-        vec![
-            escaped_prompt,
-            "--model".to_string(),
-            model.clone(),
-            "--output-format".to_string(),
-            "stream-json".to_string(),
-            "--verbose".to_string(),
-            "--dangerously-skip-permissions".to_string(),
-        ]
-    };
+    // 使用新的参数构建函数（先映射模型名称）
+    let mapped_model = map_model_to_claude_alias(&model);
+    let args = build_execution_args(&execution_config, &prompt, &mapped_model, escape_prompt_for_cli);
 
     // Create command
     let cmd = create_system_command(&claude_path, args, &project_path)?;
@@ -1525,37 +1527,24 @@ pub async fn continue_claude_code(
 
     let claude_path = find_claude_binary(&app)?;
     
+    // 获取当前执行配置
+    let execution_config = get_claude_execution_config(app.clone()).await
+        .unwrap_or_else(|e| {
+            log::warn!("Failed to load execution config, using default: {}", e);
+            ClaudeExecutionConfig::default()
+        });
     
-    // Escape prompt for command line - handle multiline content properly
-    let escaped_prompt = escape_prompt_for_cli(&prompt);
+    log::info!("Continuing with execution config: permissions_mode={:?}, dangerous_skip={}", 
+        execution_config.permissions.permission_mode,
+        execution_config.permissions.enable_dangerous_skip
+    );
     
-    // Build arguments based on whether it's a slash command
-    let args = if prompt.trim().starts_with('/') {
-        // For slash commands, use the --prompt flag explicitly
-        vec![
-            "-c".to_string(), // Continue the most recent conversation
-            "--prompt".to_string(),
-            escaped_prompt,
-            "--model".to_string(),
-            model.clone(),
-            "--output-format".to_string(),
-            "stream-json".to_string(),
-            "--verbose".to_string(),
-            "--dangerously-skip-permissions".to_string(),
-        ]
-    } else {
-        // For regular prompts, pass as positional argument
-        vec![
-            "-c".to_string(), // Continue the most recent conversation
-            escaped_prompt,
-            "--model".to_string(),
-            model.clone(),
-            "--output-format".to_string(),
-            "stream-json".to_string(),
-            "--verbose".to_string(),
-            "--dangerously-skip-permissions".to_string(),
-        ]
-    };
+    // 使用新的参数构建函数，添加 -c 标志用于继续对话（先映射模型名称）
+    let mapped_model = map_model_to_claude_alias(&model);
+    let mut args = build_execution_args(&execution_config, &prompt, &mapped_model, escape_prompt_for_cli);
+    
+    // 在开头插入 -c 标志
+    args.insert(0, "-c".to_string());
 
     // Create command
     let cmd = create_system_command(&claude_path, args, &project_path)?;
@@ -1590,22 +1579,25 @@ pub async fn resume_claude_code(
 
     let claude_path = find_claude_binary(&app)?;
     
+    // 获取当前执行配置
+    let execution_config = get_claude_execution_config(app.clone()).await
+        .unwrap_or_else(|e| {
+            log::warn!("Failed to load execution config, using default: {}", e);
+            ClaudeExecutionConfig::default()
+        });
     
-    // Escape prompt for command line - handle multiline content properly
-    let escaped_prompt = escape_prompt_for_cli(&prompt);
+    log::info!("Resuming with execution config: permissions_mode={:?}, dangerous_skip={}", 
+        execution_config.permissions.permission_mode,
+        execution_config.permissions.enable_dangerous_skip
+    );
     
-    // Fixed parameter format - use correct Claude CLI resume syntax
-    let args = vec![
-        "--resume".to_string(),
-        session_id.clone(),
-        escaped_prompt,
-        "--model".to_string(),
-        model.clone(),
-        "--output-format".to_string(),
-        "stream-json".to_string(),
-        "--verbose".to_string(),
-        "--dangerously-skip-permissions".to_string(),
-    ];
+    // 使用新的参数构建函数，添加 --resume 和 session_id（先映射模型名称）
+    let mapped_model = map_model_to_claude_alias(&model);
+    let mut args = build_execution_args(&execution_config, &prompt, &mapped_model, escape_prompt_for_cli);
+    
+    // 为resume模式重新组织参数：--resume session_id 应该在最前面
+    args.insert(0, "--resume".to_string());
+    args.insert(1, session_id.clone());
 
     log::info!("Resume command: claude {}", args.join(" "));
 
@@ -1870,7 +1862,7 @@ async fn spawn_claude_process(app: AppHandle, mut cmd: Command, prompt: String, 
             if let Some(ref session_id) = *session_id_holder_clone.lock().unwrap() {
                 let _ = app_handle.emit(&format!("claude-output:{}", session_id), &line);
             }
-            // Also emit to the generic event for backward compatibility
+            // Also emit to the generic event for backward compatibility and early messages
             let _ = app_handle.emit("claude-output", &line);
         }
     });
@@ -2976,7 +2968,7 @@ pub async fn enhance_prompt(
     let mut command = tokio::process::Command::new(&claude_path);
     command.args(&[
         "--print",
-        "--model", &model
+        "--model", &map_model_to_claude_alias(&model)
     ]);
 
     // 设置stdin
@@ -3193,6 +3185,168 @@ fn validate_window_state(state: &WindowState) -> bool {
     }
     
     true
+}
+
+// ==================== 权限管理相关命令 ====================
+
+/// 获取当前Claude执行配置
+#[tauri::command]
+pub async fn get_claude_execution_config(app: AppHandle) -> Result<ClaudeExecutionConfig, String> {
+    let claude_dir = get_claude_dir()
+        .map_err(|e| format!("Failed to get Claude directory: {}", e))?;
+    let config_file = claude_dir.join("execution_config.json");
+    
+    if config_file.exists() {
+        match fs::read_to_string(&config_file) {
+            Ok(content) => {
+                match serde_json::from_str::<ClaudeExecutionConfig>(&content) {
+                    Ok(config) => {
+                        log::info!("Loaded Claude execution config");
+                        Ok(config)
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to parse execution config: {}, using default", e);
+                        Ok(ClaudeExecutionConfig::default())
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to read execution config: {}, using default", e);
+                Ok(ClaudeExecutionConfig::default())
+            }
+        }
+    } else {
+        log::info!("No execution config file found, using default");
+        Ok(ClaudeExecutionConfig::default())
+    }
+}
+
+/// 更新Claude执行配置
+#[tauri::command]
+pub async fn update_claude_execution_config(
+    app: AppHandle,
+    config: ClaudeExecutionConfig,
+) -> Result<(), String> {
+    let claude_dir = get_claude_dir()
+        .map_err(|e| format!("Failed to get Claude directory: {}", e))?;
+    let config_file = claude_dir.join("execution_config.json");
+    
+    let json_string = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+        
+    fs::write(&config_file, json_string)
+        .map_err(|e| format!("Failed to write config file: {}", e))?;
+        
+    log::info!("Updated Claude execution config");
+    Ok(())
+}
+
+/// 重置Claude执行配置为默认值
+#[tauri::command]
+pub async fn reset_claude_execution_config(app: AppHandle) -> Result<(), String> {
+    let config = ClaudeExecutionConfig::default();
+    update_claude_execution_config(app, config).await
+}
+
+/// 获取当前权限配置
+#[tauri::command]
+pub async fn get_claude_permission_config(app: AppHandle) -> Result<ClaudePermissionConfig, String> {
+    let execution_config = get_claude_execution_config(app).await?;
+    Ok(execution_config.permissions)
+}
+
+/// 更新权限配置
+#[tauri::command]
+pub async fn update_claude_permission_config(
+    app: AppHandle,
+    permission_config: ClaudePermissionConfig,
+) -> Result<(), String> {
+    let mut execution_config = get_claude_execution_config(app.clone()).await?;
+    execution_config.permissions = permission_config;
+    update_claude_execution_config(app, execution_config).await
+}
+
+/// 获取预设权限配置选项
+#[tauri::command]
+pub async fn get_permission_presets() -> Result<serde_json::Value, String> {
+    let presets = serde_json::json!({
+        "development": {
+            "name": "开发模式",
+            "description": "允许所有开发工具，自动接受编辑",
+            "config": ClaudePermissionConfig::development_mode()
+        },
+        "safe": {
+            "name": "安全模式", 
+            "description": "只允许读取操作，禁用危险工具",
+            "config": ClaudePermissionConfig::safe_mode()
+        },
+        "interactive": {
+            "name": "交互模式",
+            "description": "平衡的权限设置，需要确认编辑",
+            "config": ClaudePermissionConfig::interactive_mode()
+        },
+        "legacy": {
+            "name": "向后兼容",
+            "description": "保持原有的权限跳过行为",
+            "config": ClaudePermissionConfig::legacy_mode()
+        }
+    });
+    
+    Ok(presets)
+}
+
+/// 获取可用工具列表
+#[tauri::command]
+pub async fn get_available_tools() -> Result<serde_json::Value, String> {
+    let tools = serde_json::json!({
+        "development_tools": DEVELOPMENT_TOOLS,
+        "safe_tools": SAFE_TOOLS,
+        "all_tools": ALL_TOOLS
+    });
+    
+    Ok(tools)
+}
+
+/// 验证权限配置
+#[tauri::command]
+pub async fn validate_permission_config(
+    config: ClaudePermissionConfig,
+) -> Result<serde_json::Value, String> {
+    let mut validation_result = serde_json::json!({
+        "valid": true,
+        "warnings": [],
+        "errors": []
+    });
+    
+    // 检查工具列表冲突
+    let allowed_set: std::collections::HashSet<_> = config.allowed_tools.iter().collect();
+    let disallowed_set: std::collections::HashSet<_> = config.disallowed_tools.iter().collect();
+    
+    let conflicts: Vec<_> = allowed_set.intersection(&disallowed_set).collect();
+    if !conflicts.is_empty() {
+        validation_result["valid"] = serde_json::Value::Bool(false);
+        validation_result["errors"].as_array_mut().unwrap().push(
+            serde_json::json!(format!("工具冲突: {} 同时在允许和禁止列表中", conflicts.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")))
+        );
+    }
+    
+    // 检查是否启用了危险跳过模式
+    if config.enable_dangerous_skip {
+        validation_result["warnings"].as_array_mut().unwrap().push(
+            serde_json::json!("已启用危险权限跳过模式，这会绕过所有安全检查")
+        );
+    }
+    
+    // 检查读写权限组合
+    if config.permission_mode == PermissionMode::ReadOnly && 
+       (config.allowed_tools.contains(&"Write".to_string()) || 
+        config.allowed_tools.contains(&"Edit".to_string())) {
+        validation_result["warnings"].as_array_mut().unwrap().push(
+            serde_json::json!("只读模式下允许写入工具可能导致冲突")
+        );
+    }
+    
+    Ok(validation_result)
 }
 
 /// Save the current window state to file

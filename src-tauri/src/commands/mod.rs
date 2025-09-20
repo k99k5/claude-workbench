@@ -8,3 +8,4 @@ pub mod clipboard;
 pub mod provider;
 pub mod router;
 pub mod router_dynamic_rules;
+pub mod permission_config;
