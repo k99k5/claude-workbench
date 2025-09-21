@@ -3037,6 +3037,272 @@ pub async fn enhance_prompt(
     Ok(enhanced_prompt)
 }
 
+/// Enhance a prompt using Gemini CLI with gemini-2.5-pro model
+#[tauri::command]
+pub async fn enhance_prompt_with_gemini(
+    prompt: String, 
+    context: Option<Vec<String>>, 
+    _app: AppHandle
+) -> Result<String, String> {
+    log::info!("=== ENHANCE_PROMPT_WITH_GEMINI FUNCTION CALLED ===");
+    log::info!("Enhancing prompt using Gemini CLI with gemini-2.5-pro model");
+    log::info!("Prompt length: {}", prompt.len());
+    log::info!("=== ENHANCE_PROMPT_WITH_GEMINI DEBUG: Function called with prompt: {} chars", prompt.len());
+    
+    if prompt.trim().is_empty() {
+        return Ok("请输入需要增强的提示词".to_string());
+    }
+
+    // 构建会话上下文信息
+    let context_section = if let Some(recent_messages) = context {
+        if !recent_messages.is_empty() {
+            log::info!("Using {} context messages for Gemini enhancement", recent_messages.len());
+            let context_str = recent_messages.join("
+---
+");
+            format!("
+
+最近的对话上下文:
+{}
+", context_str)
+        } else {
+            log::info!("Context provided but empty");
+            String::new()
+        }
+    } else {
+        log::info!("No context provided for Gemini enhancement");
+        String::new()
+    };
+
+    // 创建针对Gemini优化的提示词增强请求
+    let enhancement_request = format!(
+        "你是一位专业的提示词工程师，擅长优化AI提示词以获得更好的结果。{}\
+        
+\
+        请按照以下要求优化这个提示词，使其更加有效、清晰和具体：
+\
+        
+\
+        **优化原则：**
+\
+        1. **明确目标** - 让目标更加清晰和可衡量
+\
+        2. **增加上下文** - 基于对话历史添加相关背景信息
+\
+        3. **结构化表达** - 使用清晰的结构和格式
+\
+        4. **具体化要求** - 添加具体的约束条件和期望
+\
+        5. **示例驱动** - 在合适时添加输入输出示例
+\
+        
+\
+        **原始提示词：**
+\
+        {}
+\
+        
+\
+        请直接返回优化后的提示词，用中文回复，不要包含解释或评论。",
+        context_section,
+        prompt.trim()
+    );
+
+    log::info!("=== ENHANCE_PROMPT_WITH_GEMINI DEBUG: Calling Gemini CLI with non-interactive mode");
+
+    // 尝试找到Gemini CLI的完整路径
+    let gemini_path = find_gemini_executable().await?;
+    
+    // 调用 Gemini CLI，使用stdin输入和非交互模式
+    let mut command = tokio::process::Command::new(&gemini_path);
+    command.args(&[
+        "-m", "gemini-2.5-pro"
+    ]);
+
+    // 设置stdin
+    command.stdin(std::process::Stdio::piped());
+    command.stdout(std::process::Stdio::piped());
+    command.stderr(std::process::Stdio::piped());
+
+    // 在Windows上隐藏控制台窗口
+    #[cfg(target_os = "windows")]
+    {
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW flag
+    }
+
+    // 设置工作目录（如果需要）
+    if let Some(home_dir) = dirs::home_dir() {
+        command.current_dir(home_dir);
+    }
+
+    // 确保环境变量正确设置
+    if let Ok(path) = std::env::var("PATH") {
+        command.env("PATH", path);
+    }
+    
+    // 添加常见的npm路径到PATH（Gemini CLI通常通过npm安装）
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        let npm_path = std::path::Path::new(&appdata).join("npm");
+        if let Some(npm_str) = npm_path.to_str() {
+            if let Ok(current_path) = std::env::var("PATH") {
+                let new_path = format!("{};{}", current_path, npm_str);
+                command.env("PATH", new_path);
+            }
+        }
+    }
+
+    log::info!("=== ENHANCE_PROMPT_WITH_GEMINI DEBUG: Attempting to spawn Gemini CLI process...");
+
+    // 启动进程
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("无法启动Gemini CLI命令: {}. 请确保Gemini CLI已正确安装并配置。可以运行 'npm install -g @google/gemini-cli' 进行安装。", e))?;
+
+    log::info!("=== ENHANCE_PROMPT_WITH_GEMINI DEBUG: Gemini CLI process spawned successfully");
+
+    // 写入增强请求到stdin
+    if let Some(mut stdin) = child.stdin.take() {
+        use tokio::io::AsyncWriteExt;
+        stdin.write_all(enhancement_request.as_bytes()).await
+            .map_err(|e| format!("无法写入输入到Gemini CLI: {}", e))?;
+        stdin.shutdown().await
+            .map_err(|e| format!("无法关闭stdin: {}", e))?;
+    }
+
+    // 等待命令完成并获取输出
+    let output = child.wait_with_output().await
+        .map_err(|e| format!("等待Gemini CLI命令完成失败: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        log::error!("Gemini CLI command failed: {}", stderr);
+        return Err(format!("Gemini CLI执行失败: {}. 请检查您的Google AI API配置。", stderr));
+    }
+
+    let enhanced_prompt = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    
+    if enhanced_prompt.is_empty() {
+        return Err("Gemini CLI返回了空的响应".to_string());
+    }
+
+    // 清理输出（移除可能的额外信息）
+    let lines: Vec<&str> = enhanced_prompt.lines().collect();
+    let mut cleaned_lines = Vec::new();
+    
+    for line in lines {
+        // 跳过Gemini CLI的状态信息行
+        if line.trim().starts_with("Loaded cached credentials") || 
+           line.trim().is_empty() {
+            continue;
+        }
+        cleaned_lines.push(line);
+    }
+    
+    let final_enhanced_prompt = cleaned_lines.join("
+").trim().to_string();
+    
+    log::info!("=== ENHANCE_PROMPT_WITH_GEMINI DEBUG: Successfully enhanced prompt: {} -> {} chars", prompt.len(), final_enhanced_prompt.len());
+    log::info!("Enhanced prompt preview: {}...", 
+        if final_enhanced_prompt.len() > 100 { 
+            &final_enhanced_prompt[..100] 
+        } else { 
+            &final_enhanced_prompt 
+        }
+    );
+
+    Ok(final_enhanced_prompt)
+}
+
+/// Find Gemini CLI executable in various locations
+async fn find_gemini_executable() -> Result<String, String> {
+    log::info!("=== ENHANCE_PROMPT_WITH_GEMINI DEBUG: Finding Gemini CLI executable...");
+    
+    // Common locations for Gemini CLI
+    let possible_paths = vec![
+        "gemini".to_string(),
+        "gemini.cmd".to_string(),
+        "gemini.exe".to_string(),
+    ];
+
+    // Try to find in PATH first
+    for path in &possible_paths {
+        let mut cmd = tokio::process::Command::new(path);
+        cmd.arg("--version");
+        
+        // 在Windows上隐藏控制台窗口
+        #[cfg(target_os = "windows")]
+        {
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW flag
+        }
+        
+        if let Ok(output) = cmd.output().await {
+            if output.status.success() {
+                log::info!("=== ENHANCE_PROMPT_WITH_GEMINI DEBUG: Found Gemini CLI at: {}", path);
+                return Ok(path.clone());
+            }
+        }
+    }
+
+    // Try common Windows npm global locations
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        let npm_path = std::path::Path::new(&appdata).join("npm");
+        let possible_npm_paths = vec![
+            npm_path.join("gemini.cmd"),
+            npm_path.join("gemini"),
+            npm_path.join("gemini.exe"),
+        ];
+
+        for path in possible_npm_paths {
+            if path.exists() {
+                if let Some(path_str) = path.to_str() {
+                    // Test if it works
+                    let mut cmd = tokio::process::Command::new(path_str);
+                    cmd.arg("--version");
+                    
+                    // 在Windows上隐藏控制台窗口
+                    #[cfg(target_os = "windows")]
+                    {
+                        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW flag
+                    }
+                    
+                    if let Ok(output) = cmd.output().await {
+                        if output.status.success() {
+                            log::info!("=== ENHANCE_PROMPT_WITH_GEMINI DEBUG: Found Gemini CLI at: {}", path_str);
+                            return Ok(path_str.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Try global npm prefix location
+    let mut npm_cmd = tokio::process::Command::new("npm");
+    npm_cmd.args(&["config", "get", "prefix"]);
+    
+    // 在Windows上隐藏控制台窗口
+    #[cfg(target_os = "windows")]
+    {
+        npm_cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW flag
+    }
+    
+    if let Ok(output) = npm_cmd.output().await {
+        if output.status.success() {
+            let prefix_string = String::from_utf8_lossy(&output.stdout);
+            let prefix = prefix_string.trim();
+            let gemini_path = std::path::Path::new(prefix).join("gemini.cmd");
+            if gemini_path.exists() {
+                if let Some(path_str) = gemini_path.to_str() {
+                    log::info!("=== ENHANCE_PROMPT_WITH_GEMINI DEBUG: Found Gemini CLI at npm prefix: {}", path_str);
+                    return Ok(path_str.to_string());
+                }
+            }
+        }
+    }
+
+    Err("无法找到Gemini CLI可执行文件。请确保Gemini CLI已正确安装。您可以运行 'npm install -g @google/gemini-cli' 来安装。".to_string())
+}
+
 /// Find Claude Code executable in various locations
 async fn find_claude_executable() -> Result<String, String> {
     // Common locations for Claude Code

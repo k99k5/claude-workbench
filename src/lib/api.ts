@@ -2220,6 +2220,21 @@ export const api = {
   },
 
   /**
+   * Enhances a prompt using Gemini CLI with gemini-2.5-pro model
+   * @param prompt - The original prompt to enhance
+   * @param context - Optional conversation context (recent messages)
+   * @returns Promise resolving to the enhanced prompt
+   */
+  async enhancePromptWithGemini(prompt: string, context?: string[]): Promise<string> {
+    try {
+      return await invoke<string>("enhance_prompt_with_gemini", { prompt, context });
+    } catch (error) {
+      console.error("Failed to enhance prompt with Gemini:", error);
+      throw error;
+    }
+  },
+
+  /**
    * Loads the saved window state from file
    * @returns Promise resolving to window state or default values
    */

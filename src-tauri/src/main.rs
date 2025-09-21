@@ -31,7 +31,7 @@ use commands::claude::{
     get_claude_permission_config, update_claude_permission_config, get_permission_presets,
     get_available_tools, validate_permission_config,
     set_custom_claude_path, get_claude_path, clear_custom_claude_path,
-    restore_project, list_hidden_projects, delete_project_permanently, enhance_prompt,
+    restore_project, list_hidden_projects, delete_project_permanently, enhance_prompt, enhance_prompt_with_gemini,
     save_window_state, load_window_state, apply_window_state,
     ClaudeProcessState,
 };
@@ -151,6 +151,7 @@ fn main() {
             get_claude_path,
             clear_custom_claude_path,
             enhance_prompt,
+            enhance_prompt_with_gemini,
             
             // Window Management
             save_window_state,

@@ -791,6 +791,44 @@ const FloatingPromptInputInner = (
       setIsEnhancing(false);
     }
   };
+  // Handle enhance prompt using Gemini CLI
+  const handleEnhancePromptWithGemini = async () => {
+    console.log('[handleEnhancePromptWithGemini] Starting Gemini enhancement...');
+    const trimmedPrompt = prompt.trim();
+    
+    if (!trimmedPrompt) {
+      setPrompt("请描述您想要完成的任务，我会帮您优化这个提示词");
+      return;
+    }
+    
+    const context = getConversationContext ? getConversationContext() : undefined;
+    setIsEnhancing(true);
+    
+    try {
+      const result = await api.enhancePromptWithGemini(trimmedPrompt, context);
+      
+      if (result && result.trim()) {
+        setPrompt(result.trim());
+        const target = isExpanded ? expandedTextareaRef.current : textareaRef.current;
+        target?.focus();
+      } else {
+        setPrompt(trimmedPrompt + '\\n\\n⚠️ Gemini优化功能返回空结果，请重试');
+      }
+    } catch (error) {
+      console.error('[handleEnhancePromptWithGemini] Failed:', error);
+      let errorMessage = '未知错误';
+      
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      } else if (typeof error === 'string') {
+        errorMessage = error;
+      }
+      
+      setPrompt(trimmedPrompt + '\\n\\n❌ Gemini: ' + errorMessage);
+    } finally {
+      setIsEnhancing(false);
+    }
+  };
 
   const handleRemoveImage = (index: number) => {
     // Remove the corresponding @mention from the prompt
@@ -1224,24 +1262,43 @@ const FloatingPromptInputInner = (
               </div>
 
               {/* Enhance Button */}
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
+              <Popover
+                trigger={
+                  <Button
+                    disabled={isEnhancing || isLoading || disabled}
+                    variant="outline"
+                    size="icon"
+                    className="h-10 w-10"
+                  >
+                    <Wand2 className={cn("h-4 w-4", isEnhancing && "animate-spin")} />
+                  </Button>
+                }
+                content={
+                  <div className="grid gap-2">
                     <Button
                       onClick={handleEnhancePrompt}
                       disabled={isEnhancing || isLoading || disabled}
-                      variant="outline"
-                      size="icon"
-                      className="h-10 w-10"
+                      variant="ghost"
+                      className="justify-start h-8 text-sm"
                     >
-                      <Wand2 className={cn("h-4 w-4", isEnhancing && "animate-spin")} />
+                      <Brain className="h-4 w-4 mr-2" />
+                      Claude (sonnet)
                     </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>优化提示词</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+                    <Button
+                      onClick={handleEnhancePromptWithGemini}
+                      disabled={isEnhancing || isLoading || disabled}
+                      variant="ghost"
+                      className="justify-start h-8 text-sm"
+                    >
+                      <Sparkles className="h-4 w-4 mr-2" />
+                      Gemini 2.5 Pro
+                    </Button>
+                  </div>
+                }
+                align="end"
+                side="top"
+                className="w-48 p-2"
+              />
 
               {/* Send/Stop Button */}
               <Button
