@@ -13,69 +13,124 @@ Claude Workbench is a comprehensive desktop GUI application for Claude CLI, buil
 - **Agent System**: GitHub-integrated agent execution with monitoring
 - **Project Management**: Session history, checkpoints, and timeline navigation
 
-**Primary Platform**: Windows (专版优化) with cross-platform GitHub Actions builds for macOS/Linux.
+**Primary Platform**: Windows (专版优化) with cross-platform builds for macOS/Linux.
+
+**Latest Updates**: Enhanced Google Gemini CLI integration, Claude Code 2025 compatibility, third-party API support, and comprehensive permission management system.
 
 ## Development Commands
 
 ### Essential Commands
 ```bash
 # Development server (frontend + backend hot reload)
-bun run tauri dev
+bun run tauri:dev
 
-# Type checking (CRITICAL for TypeScript safety) 
+# Type checking (CRITICAL for TypeScript safety)
 npx tsc --noEmit
 
-# Production build (ALWAYS required for testing)
-bun run tauri build
+# Frontend build only (faster iteration)
+bun run build
 
-# Fast development build (iteration testing)  
-bun run tauri build -- --profile dev-release
+# Production build (ALWAYS required for testing)
+bun run tauri:build
+
+# Fast development build (iteration testing)
+bun run tauri:build-fast
 
 # Rust backend only
 cd src-tauri && cargo build --release
 cd src-tauri && cargo check && cargo clippy
+
+# Additional validation commands
+cargo fmt --check         # Check Rust code formatting
+cargo test               # Run Rust tests
 ```
 
 ### Build Profiles
-- **Development**: `tauri dev` - Hot reload, debug symbols
-- **Fast Build**: `tauri build -- --profile dev-release` - Uses `dev-release` profile with opt-level=2, thin LTO
-- **Production**: `tauri build` - Full optimization with opt-level="z", full LTO, strip symbols
+- **Development**: `bun run tauri:dev` - Hot reload, debug symbols
+- **Fast Build**: `bun run tauri:build-fast` - Uses `dev-release` profile with opt-level=2, thin LTO
+- **Production**: `bun run tauri:build` - Full optimization with opt-level="z", full LTO, strip symbols
+
+### Build Targets
+The project supports multiple build targets configured in `tauri.conf.json`:
+- **Windows**: MSI and NSIS installers
+- **macOS**: DMG and APP bundles
+- **Linux**: AppImage and DEB packages
 
 ### Prerequisites
-- **Bun** (recommended) - Required for cross-platform builds  
+- **Bun** (recommended) - Required for cross-platform builds
 - **Rust 2021+** with Tauri CLI
 - **Node.js 18+**
 - **Windows**: Microsoft C++ Build Tools, WebView2
 
+### Development Tools
+- **No Test Framework**: This project currently does not have automated tests configured
+- **Type Checking**: Use `npx tsc --noEmit` for TypeScript validation
+- **Linting**: No explicit linter configured - relies on TypeScript strict mode
+- **Code Formatting**: Relies on editor configuration (VS Code settings recommended)
+
 ## Core Architecture
+
+### Key File Structure
+```
+src/
+├── components/
+│   ├── ClaudeCodeSession.tsx    # Core Claude interaction (CRITICAL: uses INLINE listeners)
+│   ├── FloatingPromptInput.tsx  # Universal prompt interface with thinking modes
+│   ├── ProviderManager.tsx      # API provider CRUD interface (core feature)
+│   ├── Settings.tsx             # Multi-tab configuration interface
+│   ├── DeletedProjects.tsx      # Project recovery interface
+│   ├── AgentExecution.tsx       # Agent execution monitoring
+│   └── ui/                      # Radix UI components with Tailwind styling
+├── lib/
+│   ├── api.ts                   # Type-safe Tauri invoke interface (236 commands)
+│   └── utils.ts                 # General utilities
+├── hooks/                       # Custom React hooks and i18n
+└── contexts/                    # React context providers
+
+src-tauri/src/
+├── commands/                    # Modular command handlers
+│   ├── claude.rs               # Claude CLI integration, process lifecycle (CRITICAL)
+│   ├── provider.rs             # API provider configuration management (core feature)
+│   ├── mcp.rs                  # MCP server lifecycle management
+│   ├── agents.rs               # Agent execution with GitHub integration
+│   └── storage.rs              # SQLite database operations
+└── process/                     # Process registry and lifecycle management
+```
 
 ### System Architecture
 The application follows a multi-layered architecture with clear separation between frontend, IPC bridge, and backend:
 
 ```
 Frontend (React 18 + TypeScript)
-├── App.tsx - Main application router and state
-├── components/ - 40+ specialized components  
+├── App.tsx - Main application router with 11 distinct views
+├── components/ - 50+ specialized components including:
 │   ├── ClaudeCodeSession.tsx - Core Claude interaction (CRITICAL: uses INLINE listeners)
 │   ├── FloatingPromptInput.tsx - Universal prompt interface with thinking modes
 │   ├── ProviderManager.tsx - API provider CRUD interface (core feature)
 │   ├── Settings.tsx - Multi-tab configuration interface
 │   ├── DeletedProjects.tsx - Project recovery and permanent deletion interface
-│   └── AgentExecution.tsx - Agent execution monitoring
+│   ├── AgentExecution.tsx - Agent execution monitoring
+│   ├── MCPManager.tsx - Model Context Protocol server management
+│   └── UsageDashboard.tsx - Comprehensive usage analytics
 ├── lib/
-│   ├── api.ts - Type-safe Tauri invoke interface (236 commands)
-│   └── utils.ts - General utilities
-└── hooks/ - Custom React hooks and i18n
+│   ├── api.ts - Type-safe Tauri invoke interface (256 commands)
+│   └── utils.ts - General utilities with i18n support
+├── hooks/ - Custom React hooks including useTranslation
+└── contexts/ - React context providers for global state
 
-Backend (Rust + Tauri 2)  
-├── main.rs - Application entry, command registration (236 commands)
-├── commands/ - Modular command handlers
+Backend (Rust + Tauri 2)
+├── main.rs - Application entry, command registration (256 total commands)
+├── commands/ - Modular command handlers including:
 │   ├── claude.rs - Claude CLI integration, process lifecycle (CRITICAL)
 │   ├── provider.rs - API provider configuration management (core feature)
 │   ├── mcp.rs - MCP server lifecycle management
 │   ├── agents.rs - Agent execution with GitHub integration
-│   └── storage.rs - SQLite database operations  
-└── process/ - Process registry and lifecycle management
+│   ├── usage.rs - Comprehensive usage tracking and analytics
+│   ├── storage.rs - SQLite database operations
+│   ├── permission_config.rs - Permission management system
+│   └── slash_commands.rs - Custom slash command handling
+├── process/ - Process registry and lifecycle management
+└── checkpoint/ - Session checkpoint and timeline management
 ```
 
 ### Event System Architecture (CRITICAL)
@@ -266,6 +321,12 @@ This fork includes Windows-specific optimizations:
 - **TypeScript** (`tsconfig.json`): ES2020 strict mode, path mapping `@/*` → `./src/*`
 
 ## Recent Critical Updates (2024-2025)
+
+### December 2024 - Claude Code 2025 Integration
+- **MAJOR UPDATE**: Enhanced Google Gemini CLI integration for prompt optimization
+- **New Feature**: Advanced permission management system with tool-level controls
+- **Improvement**: Third-party API provider support with enhanced configuration
+- **Enhancement**: Comprehensive usage analytics and burn rate monitoring
 
 ### December 2024 - Provider Configuration Standardization
 - **BREAKING CHANGE**: Provider configuration now follows Claude CLI standard

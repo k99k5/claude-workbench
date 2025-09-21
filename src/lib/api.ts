@@ -354,18 +354,6 @@ export interface FileDiff {
 }
 
 /**
- * Window state for saving/restoring window size and position
- */
-export interface WindowState {
-  width: number;
-  height: number;
-  x?: number;
-  y?: number;
-  maximized: boolean;
-  fullscreen: boolean;
-}
-
-/**
  * Provider configuration for API switching
  */
 export interface ProviderConfig {
@@ -2230,46 +2218,6 @@ export const api = {
       return await invoke<string>("enhance_prompt_with_gemini", { prompt, context });
     } catch (error) {
       console.error("Failed to enhance prompt with Gemini:", error);
-      throw error;
-    }
-  },
-
-  /**
-   * Loads the saved window state from file
-   * @returns Promise resolving to window state or default values
-   */
-  async loadWindowState(): Promise<WindowState> {
-    try {
-      return await invoke<WindowState>("load_window_state");
-    } catch (error) {
-      console.error("Failed to load window state:", error);
-      throw error;
-    }
-  },
-
-  /**
-   * Saves the current window state to file
-   * @returns Promise resolving when state is saved
-   */
-  async saveWindowState(): Promise<void> {
-    try {
-      await invoke<void>("save_window_state");
-    } catch (error) {
-      console.error("Failed to save window state:", error);
-      throw error;
-    }
-  },
-
-  /**
-   * Applies a window state to the current window
-   * @param state - The window state to apply
-   * @returns Promise resolving when state is applied
-   */
-  async applyWindowState(state: WindowState): Promise<void> {
-    try {
-      await invoke<void>("apply_window_state", { state });
-    } catch (error) {
-      console.error("Failed to apply window state:", error);
       throw error;
     }
   },

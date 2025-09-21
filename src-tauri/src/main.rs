@@ -32,7 +32,6 @@ use commands::claude::{
     get_available_tools, validate_permission_config,
     set_custom_claude_path, get_claude_path, clear_custom_claude_path,
     restore_project, list_hidden_projects, delete_project_permanently, enhance_prompt, enhance_prompt_with_gemini,
-    save_window_state, load_window_state, apply_window_state,
     ClaudeProcessState,
 };
 use commands::mcp::{
@@ -61,6 +60,7 @@ use commands::provider::{
 use process::ProcessRegistryState;
 use std::sync::Mutex;
 use tauri::Manager;
+use tauri_plugin_window_state::Builder as WindowStatePlugin;
 
 fn main() {
     // Initialize logger
@@ -71,6 +71,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(WindowStatePlugin::default().build())
         .setup(|app| {
             // Initialize agents database
             let conn = init_database(&app.handle()).expect("Failed to initialize agents database");
@@ -152,12 +153,6 @@ fn main() {
             clear_custom_claude_path,
             enhance_prompt,
             enhance_prompt_with_gemini,
-            
-            // Window Management
-            save_window_state,
-            load_window_state,
-            apply_window_state,
-            
             // Checkpoint Management
             create_checkpoint,
             restore_checkpoint,
