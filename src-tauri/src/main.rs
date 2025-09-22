@@ -57,6 +57,11 @@ use commands::provider::{
     clear_provider_config, test_provider_connection, add_provider_config,
     update_provider_config, delete_provider_config, get_provider_config,
 };
+use commands::translator::{
+    translate, translate_batch, get_translation_config, update_translation_config,
+    clear_translation_cache, get_translation_cache_stats, detect_text_language,
+    init_translation_service_command, init_translation_service_with_saved_config,
+};
 use process::ProcessRegistryState;
 use std::sync::Mutex;
 use tauri::Manager;
@@ -71,7 +76,11 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .plugin(WindowStatePlugin::default().build())
+        .plugin(
+            WindowStatePlugin::default()
+                .with_state_flags(tauri_plugin_window_state::StateFlags::all())
+                .build()
+        )
         .setup(|app| {
             // Initialize agents database
             let conn = init_database(&app.handle()).expect("Failed to initialize agents database");
@@ -104,6 +113,10 @@ fn main() {
             // Initialize Claude process state
             app.manage(ClaudeProcessState::default());
 
+            // Initialize translation service with saved configuration
+            tauri::async_runtime::spawn(async move {
+                commands::translator::init_translation_service_with_saved_config().await;
+            });
 
 
             Ok(())
@@ -253,6 +266,16 @@ fn main() {
             update_provider_config,
             delete_provider_config,
             get_provider_config,
+            
+            // Translation
+            translate,
+            translate_batch,
+            get_translation_config,
+            update_translation_config,
+            clear_translation_cache,
+            get_translation_cache_stats,
+            detect_text_language,
+            init_translation_service_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

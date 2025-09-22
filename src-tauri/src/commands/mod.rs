@@ -7,3 +7,4 @@ pub mod slash_commands;
 pub mod clipboard;
 pub mod provider;
 pub mod permission_config;
+pub mod translator;

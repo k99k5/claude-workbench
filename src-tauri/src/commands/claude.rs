@@ -3053,18 +3053,12 @@ pub async fn enhance_prompt_with_gemini(
         return Ok("请输入需要增强的提示词".to_string());
     }
 
-    // 构建会话上下文信息
+    // 构建会话上下文信息（与Claude Code版本保持一致）
     let context_section = if let Some(recent_messages) = context {
         if !recent_messages.is_empty() {
             log::info!("Using {} context messages for Gemini enhancement", recent_messages.len());
-            let context_str = recent_messages.join("
----
-");
-            format!("
-
-最近的对话上下文:
-{}
-", context_str)
+            let context_str = recent_messages.join("\n---\n");
+            format!("\n\nRecent conversation context:\n{}\n", context_str)
         } else {
             log::info!("Context provided but empty");
             String::new()
@@ -3074,36 +3068,18 @@ pub async fn enhance_prompt_with_gemini(
         String::new()
     };
 
-    // 创建针对Gemini优化的提示词增强请求
+    // 创建与Claude Code版本保持一致的提示词增强请求
     let enhancement_request = format!(
-        "你是一位专业的提示词工程师，擅长优化AI提示词以获得更好的结果。{}\
-        
-\
-        请按照以下要求优化这个提示词，使其更加有效、清晰和具体：
-\
-        
-\
-        **优化原则：**
-\
-        1. **明确目标** - 让目标更加清晰和可衡量
-\
-        2. **增加上下文** - 基于对话历史添加相关背景信息
-\
-        3. **结构化表达** - 使用清晰的结构和格式
-\
-        4. **具体化要求** - 添加具体的约束条件和期望
-\
-        5. **示例驱动** - 在合适时添加输入输出示例
-\
-        
-\
-        **原始提示词：**
-\
-        {}
-\
-        
-\
-        请直接返回优化后的提示词，用中文回复，不要包含解释或评论。",
+        "You are helping to enhance a prompt based on the current conversation context. {}\
+        \n\
+        Please improve and optimize this prompt to make it more effective, clear, and specific. Focus on:\n\
+        1. Making it relevant to the current conversation context\n\
+        2. Adding clarity and structure\n\
+        3. Making it more actionable and specific\n\
+        4. Including relevant technical details from the context\n\
+        5. Following prompt engineering best practices\n\n\
+        Original prompt:\n{}\n\n\
+        Please provide only the improved prompt as your response in Chinese, without explanations, commentary, or phrases like '这是优化后的提示词'.",
         context_section,
         prompt.trim()
     );
@@ -3185,21 +3161,46 @@ pub async fn enhance_prompt_with_gemini(
         return Err("Gemini CLI返回了空的响应".to_string());
     }
 
-    // 清理输出（移除可能的额外信息）
-    let lines: Vec<&str> = enhanced_prompt.lines().collect();
-    let mut cleaned_lines = Vec::new();
+    // 清理输出（移除无用的话语和状态信息）
+    let mut final_enhanced_prompt = enhanced_prompt.clone();
     
-    for line in lines {
-        // 跳过Gemini CLI的状态信息行
-        if line.trim().starts_with("Loaded cached credentials") || 
-           line.trim().is_empty() {
-            continue;
-        }
-        cleaned_lines.push(line);
+    // 移除常见的无用前缀和后缀
+    let unwanted_phrases = [
+        "这是优化后的提示词：",
+        "优化后的提示词：",
+        "这是优化后的提示词",
+        "优化后的提示词",
+        "以下是优化后的提示词：",
+        "以下是优化后的提示词",
+        "Loaded cached credentials",
+        "Here's the enhanced prompt:",
+        "Enhanced prompt:",
+        "Optimized prompt:",
+    ];
+    
+    for phrase in &unwanted_phrases {
+        final_enhanced_prompt = final_enhanced_prompt.replace(phrase, "");
     }
     
-    let final_enhanced_prompt = cleaned_lines.join("
-").trim().to_string();
+    // 清理空行和多余的空白
+    let lines: Vec<&str> = final_enhanced_prompt.lines()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty() && !line.starts_with("Loaded cached credentials"))
+        .collect();
+    
+    final_enhanced_prompt = lines.join("\n").trim().to_string();
+    
+    // 移除开头和结尾的引号（如果存在）
+    if final_enhanced_prompt.starts_with('"') && final_enhanced_prompt.ends_with('"') {
+        final_enhanced_prompt = final_enhanced_prompt[1..final_enhanced_prompt.len()-1].to_string();
+    }
+    
+    // 移除开头和结尾的其他标记
+    final_enhanced_prompt = final_enhanced_prompt
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim()
+        .to_string();
     
     log::info!("=== ENHANCE_PROMPT_WITH_GEMINI DEBUG: Successfully enhanced prompt: {} -> {} chars", prompt.len(), final_enhanced_prompt.len());
     log::info!("Enhanced prompt preview: {}...", 

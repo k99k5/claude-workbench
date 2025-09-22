@@ -690,6 +690,7 @@ dependencies = [
  "image",
  "lazy_static",
  "log",
+ "once_cell",
  "regex",
  "reqwest",
  "rusqlite",

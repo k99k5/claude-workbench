@@ -4,370 +4,271 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Claude Workbench is a comprehensive desktop GUI application for Claude CLI, built with Tauri 2 (Rust backend) and React 18 TypeScript frontend. This is a Windows-optimized fork based on [@getAsterisk/claudia](https://github.com/getAsterisk/claudia) with specialized Windows desktop integration.
-
-**Core Features:**
-- **Provider Management**: Silent API provider switching with local configuration storage - the primary differentiating feature
-- **Claude CLI Integration**: Complete process management with session handling and streaming output  
-- **MCP Support**: Full Model Context Protocol server lifecycle management
-- **Agent System**: GitHub-integrated agent execution with monitoring
-- **Project Management**: Session history, checkpoints, and timeline navigation
-
-**Primary Platform**: Windows (专版优化) with cross-platform builds for macOS/Linux.
-
-**Latest Updates**: Enhanced Google Gemini CLI integration, Claude Code 2025 compatibility, third-party API support, and comprehensive permission management system.
+Claude Workbench is a professional desktop application and toolkit for Claude CLI, specifically optimized for Windows users. It's built with a modern tech stack combining React 18 frontend with Tauri 2 and Rust backend.
 
 ## Development Commands
 
-### Essential Commands
+### Package Management & Dependencies
 ```bash
-# Development server (frontend + backend hot reload)
-bun run tauri:dev
+# Install dependencies (recommended: use bun for optimal performance)
+bun install
+# or alternatively
+npm install
 
-# Type checking (CRITICAL for TypeScript safety)
-npx tsc --noEmit
-
-# Frontend build only (faster iteration)
-bun run build
-
-# Production build (ALWAYS required for testing)
-bun run tauri:build
-
-# Fast development build (iteration testing)
-bun run tauri:build-fast
-
-# Rust backend only
-cd src-tauri && cargo build --release
-cd src-tauri && cargo check && cargo clippy
-
-# Additional validation commands
-cargo fmt --check         # Check Rust code formatting
-cargo test               # Run Rust tests
+# Check dependencies and update
+npm audit
+cargo update
 ```
 
-### Build Profiles
-- **Development**: `bun run tauri:dev` - Hot reload, debug symbols
-- **Fast Build**: `bun run tauri:build-fast` - Uses `dev-release` profile with opt-level=2, thin LTO
-- **Production**: `bun run tauri:build` - Full optimization with opt-level="z", full LTO, strip symbols
+### Development Workflow
+```bash
+# Start development server (frontend + backend)
+npm run tauri dev
+# or
+bun run tauri dev
 
-### Build Targets
-The project supports multiple build targets configured in `tauri.conf.json`:
-- **Windows**: MSI and NSIS installers
-- **macOS**: DMG and APP bundles
-- **Linux**: AppImage and DEB packages
+# Frontend only development
+npm run dev
+bun run dev
 
-### Prerequisites
-- **Bun** (recommended) - Required for cross-platform builds
-- **Rust 2021+** with Tauri CLI
-- **Node.js 18+**
-- **Windows**: Microsoft C++ Build Tools, WebView2
+# Build for production
+npm run tauri build
+bun run tauri build
 
-### Development Tools
-- **No Test Framework**: This project currently does not have automated tests configured
-- **Type Checking**: Use `npx tsc --noEmit` for TypeScript validation
-- **Linting**: No explicit linter configured - relies on TypeScript strict mode
-- **Code Formatting**: Relies on editor configuration (VS Code settings recommended)
-
-## Core Architecture
-
-### Key File Structure
-```
-src/
-├── components/
-│   ├── ClaudeCodeSession.tsx    # Core Claude interaction (CRITICAL: uses INLINE listeners)
-│   ├── FloatingPromptInput.tsx  # Universal prompt interface with thinking modes
-│   ├── ProviderManager.tsx      # API provider CRUD interface (core feature)
-│   ├── Settings.tsx             # Multi-tab configuration interface
-│   ├── DeletedProjects.tsx      # Project recovery interface
-│   ├── AgentExecution.tsx       # Agent execution monitoring
-│   └── ui/                      # Radix UI components with Tailwind styling
-├── lib/
-│   ├── api.ts                   # Type-safe Tauri invoke interface (236 commands)
-│   └── utils.ts                 # General utilities
-├── hooks/                       # Custom React hooks and i18n
-└── contexts/                    # React context providers
-
-src-tauri/src/
-├── commands/                    # Modular command handlers
-│   ├── claude.rs               # Claude CLI integration, process lifecycle (CRITICAL)
-│   ├── provider.rs             # API provider configuration management (core feature)
-│   ├── mcp.rs                  # MCP server lifecycle management
-│   ├── agents.rs               # Agent execution with GitHub integration
-│   └── storage.rs              # SQLite database operations
-└── process/                     # Process registry and lifecycle management
+# Fast development build (optimized for speed)
+npm run tauri:build-fast
 ```
 
-### System Architecture
-The application follows a multi-layered architecture with clear separation between frontend, IPC bridge, and backend:
+### Code Quality & Testing
+```bash
+# TypeScript compilation check
+npm run build    # Includes tsc && vite build
 
-```
-Frontend (React 18 + TypeScript)
-├── App.tsx - Main application router with 11 distinct views
-├── components/ - 50+ specialized components including:
-│   ├── ClaudeCodeSession.tsx - Core Claude interaction (CRITICAL: uses INLINE listeners)
-│   ├── FloatingPromptInput.tsx - Universal prompt interface with thinking modes
-│   ├── ProviderManager.tsx - API provider CRUD interface (core feature)
-│   ├── Settings.tsx - Multi-tab configuration interface
-│   ├── DeletedProjects.tsx - Project recovery and permanent deletion interface
-│   ├── AgentExecution.tsx - Agent execution monitoring
-│   ├── MCPManager.tsx - Model Context Protocol server management
-│   └── UsageDashboard.tsx - Comprehensive usage analytics
-├── lib/
-│   ├── api.ts - Type-safe Tauri invoke interface (256 commands)
-│   └── utils.ts - General utilities with i18n support
-├── hooks/ - Custom React hooks including useTranslation
-└── contexts/ - React context providers for global state
+# Rust compilation and checks
+cd src-tauri
+cargo check      # Quick syntax check
+cargo clippy     # Linting for Rust code
+cargo fmt        # Format Rust code
+cargo test       # Run Rust tests
 
-Backend (Rust + Tauri 2)
-├── main.rs - Application entry, command registration (256 total commands)
-├── commands/ - Modular command handlers including:
-│   ├── claude.rs - Claude CLI integration, process lifecycle (CRITICAL)
-│   ├── provider.rs - API provider configuration management (core feature)
-│   ├── mcp.rs - MCP server lifecycle management
-│   ├── agents.rs - Agent execution with GitHub integration
-│   ├── usage.rs - Comprehensive usage tracking and analytics
-│   ├── storage.rs - SQLite database operations
-│   ├── permission_config.rs - Permission management system
-│   └── slash_commands.rs - Custom slash command handling
-├── process/ - Process registry and lifecycle management
-└── checkpoint/ - Session checkpoint and timeline management
+# Combined quality checks (run these before commits)
+npm run build && cd src-tauri && cargo clippy && cargo fmt
 ```
 
-### Event System Architecture (CRITICAL)
-The application uses a sophisticated event listener pattern that must be understood for debugging:
+## Architecture Overview
 
-**ClaudeCodeSession.tsx** - Uses INLINE event listeners with generic→specific switching:
-1. **Generic listeners** capture initialization messages across all sessions
-2. **Session-specific listeners** provide isolation once session ID is detected
-3. **Cleanup pattern** prevents memory leaks with proper unlisten management
+### Frontend Architecture (React 18 + TypeScript)
+- **Entry Point**: `src/main.tsx` - React app initialization with Tauri window management
+- **Main App**: `src/App.tsx` - Central router with view-based navigation system
+- **Component Structure**: 60+ specialized components in `src/components/`
+  - UI Components: `src/components/ui/` (Radix UI + Tailwind CSS)
+  - Feature Components: Core functionality like `ClaudeCodeSession`, `MCPManager`, `ProviderManager`
+- **API Layer**: `src/lib/api.ts` - Comprehensive TypeScript API client with 2000+ lines
+- **State Management**: React Context + hooks pattern, no external state library
+- **Styling**: Tailwind CSS 4.1.8 with OKLCH color space support
+- **Internationalization**: i18next with Chinese-first localization
 
-### Data Storage Structure
-```
-~/.claude/
-├── projects/[project-id]/[session-id].jsonl  # Session message history
-├── settings.json                             # User preferences and provider configuration (STANDARD)
-├── providers.json                            # Legacy provider presets (for backward compatibility)
-├── window_state.json                         # Window size/position memory
-└── hidden_projects.json                      # Deleted projects list for recovery system
-```
+### Backend Architecture (Rust + Tauri 2)
+- **Entry Point**: `src-tauri/src/main.rs` - Tauri app initialization and command registration
+- **Command Modules**: `src-tauri/src/commands/` - Organized by feature:
+  - `claude.rs` - Claude CLI integration and process management
+  - `agents.rs` - Agent system for GitHub integration and automation
+  - `mcp.rs` - Model Context Protocol server management
+  - `provider.rs` - API provider switching (core Windows feature)
+  - `translator.rs` - Translation middleware services
+  - `usage.rs` - Usage analytics and metrics
+  - `storage.rs` - SQLite database operations
+- **Process Management**: `src-tauri/src/process/` - Cross-platform process lifecycle
+- **Database**: SQLite with rusqlite for embedded data storage
+- **Security**: Tauri's security model with CSP and scoped filesystem access
 
-**IMPORTANT**: Provider configuration now follows Claude CLI standard - stored in `settings.json` env field, not separate `providers.json`.
+### Key Integrations
+- **Claude CLI**: Native subprocess management with real-time output streaming
+- **MCP Protocol**: Full Model Context Protocol support for server management
+- **Provider Switching**: Silent API provider switching without UI disruption
+- **Windows Optimization**: Native Windows API integration for enhanced desktop experience
 
-## Critical Implementation Details
+## Core Development Patterns
 
-### Provider Management System (Core Feature)
-The provider management system follows Claude CLI standard configuration:
-
-**Configuration Storage** (UPDATED - Claude CLI Standard):
-- **Current Config**: Stored in `~/.claude/settings.json` under `env` field
-- **Format**: Standard Claude CLI environment variables:
-```json
-{
-  "env": {
-    "ANTHROPIC_BASE_URL": "https://api.example.com",
-    "ANTHROPIC_AUTH_TOKEN": "your-token",
-    "ANTHROPIC_API_KEY": "your-key", 
-    "ANTHROPIC_MODEL": "claude-3-opus-20240229"
+### Frontend Patterns
+```typescript
+// API calls with error handling
+const handleAction = async () => {
+  try {
+    const result = await api.someCommand(params);
+    setToast({ message: "Success", type: "success" });
+  } catch (error) {
+    console.error("Operation failed:", error);
+    setToast({ message: `Error: ${error}`, type: "error" });
   }
-}
-```
-- **Presets**: Legacy `providers.json` maintained for UI convenience
-
-**Backend Implementation** (`src-tauri/src/commands/provider.rs`):
-- `get_current_provider_config()` - Reads from `settings.json` env field
-- `switch_provider_config()` - Updates `settings.json` directly (Claude CLI standard)
-- `get_provider_presets()` - Lists presets from legacy `providers.json`
-- Configuration changes take effect immediately without restart
-
-**Frontend Implementation** (`src/components/ProviderManager.tsx`):
-- Complete CRUD interface for provider presets
-- Real-time display of active configuration from `settings.json`
-- Silent switching without interrupting user workflow
-
-### Project Recovery System (NEW)
-Comprehensive deleted projects management with intelligent format handling:
-
-**Backend Implementation** (`src-tauri/src/commands/claude.rs`):
-- `list_hidden_projects()` - Lists deleted projects with directory validation
-- `restore_project()` - Restores deleted projects from hidden list
-- `delete_project_permanently()` - Permanent deletion with intelligent format detection
-- Handles both legacy (double-dash) and standard (single-dash) project encoding formats
-
-**Frontend Implementation** (`src/components/DeletedProjects.tsx`):
-- Complete recovery interface accessible via CC项目列表 → "已删除项目" tab (MOVED from Settings)
-- Format indicators showing legacy vs standard project formats
-- Batch operations for restoration and permanent deletion
-- Intelligent path decoding for both encoding schemes
-
-### Claude CLI Integration Pattern
-**Process Management** (`src-tauri/src/commands/claude.rs`):
-- `execute_claude_code()` - Start new Claude session
-- `continue_claude_code()` - Continue existing session with `-c` flag
-- `resume_claude_code()` - Resume from saved session state
-
-**Project Path Encoding** (CRITICAL for duplicate prevention):
-```rust
-// Consistent single-dash encoding to match Claude CLI
-fn encode_project_path(path: &str) -> String {
-    path.replace("\\", "-")
-        .replace("/", "-")
-        .replace(":", "")
-}
-```
-
-**Slash Command Handling**:
-```rust
-// For slash commands like /compact, /clear
-let args = if prompt.trim().starts_with('/') {
-    vec!["--prompt".to_string(), escaped_prompt, /* ... */]
-} else {
-    vec![escaped_prompt, /* ... */]
 };
+
+// Component props with proper TypeScript interfaces
+interface ComponentProps {
+  data: SomeType[];
+  onAction: (item: SomeType) => void;
+  loading?: boolean;
+}
+
+// React hooks for state management
+const [loading, setLoading] = useState(false);
+const [data, setData] = useState<Type[]>([]);
 ```
 
-### Event Listener Debugging Pattern
-When debugging Claude session issues, focus on these areas:
+### Backend Patterns
+```rust
+// Tauri command structure
+#[tauri::command]
+pub async fn command_name(param: String) -> Result<ReturnType, String> {
+    match some_operation(param).await {
+        Ok(result) => Ok(result),
+        Err(e) => Err(format!("Operation failed: {}", e))
+    }
+}
 
-1. **Generic Listener Setup**: Check browser console for `claude-output` listener setup
-2. **Session ID Detection**: Verify extraction from `system.init` messages  
-3. **Specific Listener Switch**: Confirm transition to `claude-output:${sessionId}` listeners
-4. **Cleanup Verification**: Ensure proper unlisten on component unmount
+// Error handling pattern
+async fn internal_function() -> Result<Data, Box<dyn std::error::Error>> {
+    let result = some_async_operation().await?;
+    process_result(result)
+}
 
-**Key Files for Debugging**:
-- `ClaudeCodeSession.tsx:522-650` - Event listener implementation
-- Browser DevTools Console - Real-time event flow
-
-## Common Issues & Solutions
-
-### Build Issues
-**Symptom**: "页面文件太小，无法完成操作" (Windows)
-**Solution**:
-```bash
-rustup update
-cargo clean  
-# Always use production build: bun run tauri build (not dev mode)
+// Database operations with rusqlite
+fn database_operation(conn: &Connection) -> Result<Vec<Record>, rusqlite::Error> {
+    let mut stmt = conn.prepare("SELECT * FROM table WHERE condition = ?")?;
+    let records = stmt.query_map([param], |row| {
+        Ok(Record { /* field mappings */ })
+    })?;
+    records.collect()
+}
 ```
 
-### Event Listener Problems (PRIMARY)
-**Symptom**: New Claude projects don't receive CLI output
-**Debug Steps**:
-1. Check browser console for listener setup logs
-2. Verify session ID detection in generic listeners  
-3. Confirm switch to session-specific listeners
-4. Check `~/.claude/projects/` directory structure
+## Key Features and Implementation
 
-### Provider Configuration Issues ✅ (RESOLVED)  
-**Previous Problem**: Provider configuration not following Claude CLI standard
-**Solution**: Now stores provider configuration in `~/.claude/settings.json` env field according to Claude CLI standard
+### 1. Provider Management (Core Feature)
+- **Location**: `src-tauri/src/commands/provider.rs` + `src/components/ProviderManager.tsx`
+- **Purpose**: Silent switching between API providers without UI disruption
+- **Implementation**: Environment variable management with automatic Claude process restart
 
-**Current Debug Steps**:
-```bash
-# Check current configuration (Claude CLI standard)
-cat ~/.claude/settings.json | grep -A 10 '"env"'
+### 2. Claude CLI Integration
+- **Location**: `src-tauri/src/commands/claude.rs` + `src/components/ClaudeCodeSession.tsx`
+- **Purpose**: Native Claude CLI subprocess management with streaming output
+- **Key Features**: Session management, real-time output, process lifecycle control
 
-# Verify ANTHROPIC environment variables are set
-echo $ANTHROPIC_BASE_URL $ANTHROPIC_AUTH_TOKEN
+### 3. MCP Server Management
+- **Location**: `src-tauri/src/commands/mcp.rs` + `src/components/MCPManager.tsx`
+- **Purpose**: Full Model Context Protocol server configuration and management
+- **Scope**: Local, project, and user-level server configurations
+
+### 4. Agent System
+- **Location**: `src-tauri/src/commands/agents.rs` + `src/components/CCAgents.tsx`
+- **Purpose**: GitHub-integrated agent system with import/export capabilities
+- **Features**: Agent marketplace, execution tracking, metrics collection
+
+### 5. Translation Middleware
+- **Location**: `src-tauri/src/commands/translator.rs` + `src/components/TranslationSettings.tsx`
+- **Purpose**: Real-time translation service with caching
+- **Implementation**: API-based translation with intelligent language detection
+
+## Build Configuration
+
+### Development Profiles
+- **Development**: `npm run tauri dev` - Full hot-reload with debugging
+- **Fast Build**: `npm run tauri:build-fast` - Uses `dev-release` profile for faster iteration
+- **Production**: `npm run tauri build` - Optimized for size and performance
+
+### Rust Build Optimization
+```toml
+[profile.release]
+opt-level = "z"      # Optimize for size
+lto = true           # Link Time Optimization
+strip = true         # Strip debug symbols
+codegen-units = 1    # Single-threaded optimization
 ```
 
-### Settings Save Bug ✅ (RESOLVED)
-**Previous Problem**: Saving settings would overwrite provider configuration in `settings.json`
-**Solution**: Settings save now preserves existing env variables (including ANTHROPIC_*) while adding UI-configured variables
+### Vite Configuration
+- **Code Splitting**: Manual chunks for vendor libraries
+- **Optimization**: ESBuild minification with CSS optimization
+- **Development**: HMR on port 1420 with Tauri integration
 
-### Duplicate Projects Issue ✅ (RESOLVED)
-**Previous Problem**: claude-workbench created duplicate projects due to encoding mismatch
-- Native Claude CLI: `C--Users-Administrator-Desktop-test1` (single dash)
-- claude-workbench: `C--Users--Administrator--Desktop--test1` (double dash)
+## Database Schema
 
-**Solution**: Implemented `encode_project_path()` function using single-dash encoding to match Claude CLI exactly. Removed redundant manual project creation code that was duplicating Claude CLI's automatic project creation.
+### Core Tables
+- **agents**: Agent definitions and configurations
+- **agent_runs**: Execution history and metrics
+- **usage_logs**: Token usage and cost tracking
+- **checkpoints**: Session state management
+- **provider_configs**: API provider configurations
 
-### Project Recovery System Issues
-**Symptom**: Correct format projects don't appear in deleted list
-**Solution**: Enhanced `list_hidden_projects()` with directory validation and intelligent format matching for both single-dash and double-dash encoded project IDs.
+## Environment Setup
 
-**Symptom**: Permanent deletion fails on manually deleted directories  
-**Solution**: Added intelligent directory detection in `delete_project_permanently()` that handles missing directories gracefully.
+### Required Tools
+- **Node.js**: 18+ (LTS recommended)
+- **Rust**: Latest stable via rustup
+- **Bun**: Recommended for optimal package management performance
+- **System Dependencies**: Windows Build Tools (Windows), Xcode CLI (macOS)
 
-### Window State Management ✅
-**功能**: 应用程序会记住关闭前的窗口大小和位置，下次启动时自动恢复
-**安全机制**: 
-- 自动验证窗口状态有效性，防止窗口不可见
-- 过滤最小化、无效尺寸或极端位置的状态
-- 加载时验证，如无效则使用默认值
-**配置文件**: `~/.claude/window_state.json`
+### Configuration Files
+- **Tauri**: `src-tauri/tauri.conf.json` - App configuration and permissions
+- **Vite**: `vite.config.ts` - Frontend build configuration
+- **TypeScript**: `tsconfig.json` - Strict type checking enabled
+- **Rust**: `src-tauri/Cargo.toml` - Dependencies and build profiles
 
-## Performance Optimizations
+## Development Guidelines
 
-### Build Profiles
-- **Development**: Full debug info, incremental compilation
-- **Fast Build** (`dev-release`): opt-level=2, thin LTO, parallel codegen  
-- **Production**: opt-level="z", full LTO, strip symbols, panic=abort
+### Code Organization
+- Follow existing patterns in similar components
+- Use TypeScript interfaces for all data structures
+- Implement proper error handling at all levels
+- Maintain separation between UI logic and business logic
 
-### Frontend Performance
-- **Virtual Scrolling**: @tanstack/react-virtual for large message lists
-- **Event Cleanup**: Proper unlisten patterns prevent memory leaks
-- **Message Filtering**: Smart filtering reduces DOM elements
-- **Database Pagination**: Efficient queries for large datasets
+### Performance Considerations
+- Use React.memo() for expensive components
+- Implement virtual scrolling for large lists (see ClaudeCodeSession)
+- Leverage Rust's async/await for backend operations
+- Cache expensive operations where appropriate
 
-## Windows-Specific Optimizations
+### Security Practices
+- Never hardcode API keys or sensitive data
+- Use Tauri's scoped filesystem access
+- Validate all user inputs on both frontend and backend
+- Follow CSP guidelines for web content
 
-This fork includes Windows-specific optimizations:
-- **Process Creation**: Optimized Windows process spawning for Claude CLI
-- **Path Handling**: Windows long path support with `\\?\` prefix handling  
-- **Environment Integration**: Native Windows environment variable handling
-- **Build Targets**: MSI and NSIS installers optimized for Windows deployment
+## Common Development Tasks
 
-**Configuration Files**:
-- **Tauri** (`tauri.conf.json`): CSP with asset protocol, Windows bundle targets
-- **TypeScript** (`tsconfig.json`): ES2020 strict mode, path mapping `@/*` → `./src/*`
+### Adding a New Tauri Command
+1. Define the command in appropriate module under `src-tauri/src/commands/`
+2. Register it in `src-tauri/src/main.rs` invoke_handler
+3. Add TypeScript interface in `src/lib/api.ts`
+4. Implement frontend integration in relevant component
 
-## Recent Critical Updates (2024-2025)
+### Adding a New UI Component
+1. Create component in `src/components/`
+2. Follow existing naming conventions (PascalCase)
+3. Use TypeScript with proper prop interfaces
+4. Integrate with existing UI component library patterns
 
-### December 2024 - Claude Code 2025 Integration
-- **MAJOR UPDATE**: Enhanced Google Gemini CLI integration for prompt optimization
-- **New Feature**: Advanced permission management system with tool-level controls
-- **Improvement**: Third-party API provider support with enhanced configuration
-- **Enhancement**: Comprehensive usage analytics and burn rate monitoring
+### Database Schema Changes
+1. Update relevant command modules for new table structures
+2. Implement migration logic in initialization functions
+3. Update TypeScript interfaces to match new schema
+4. Test with both fresh installs and existing databases
 
-### December 2024 - Provider Configuration Standardization
-- **BREAKING CHANGE**: Provider configuration now follows Claude CLI standard
-- **Migration**: Configuration moved from `providers.json` to `settings.json` env field
-- **Impact**: Fully compatible with native Claude CLI configuration
-- **Benefit**: No more configuration conflicts between claude-workbench and Claude CLI
+## Debugging and Troubleshooting
 
-### December 2024 - Project Management UI Overhaul  
-- **UI Improvement**: Moved deleted projects from Settings to main project list
-- **New Feature**: Tabbed interface with "活跃项目" and "已删除项目" tabs
-- **UX Enhancement**: Unified project management in single interface
-- **Technical**: Uses controlled Tabs component with state management
+### Frontend Debugging
+- Use browser DevTools with React Developer Tools
+- Check console for TypeScript compilation errors
+- Monitor network tab for API call failures
+- Use Tauri's development console for backend communication
 
-### December 2024 - Settings Save Protection
-- **Critical Fix**: Settings save no longer overwrites provider configuration
-- **Implementation**: Preserves existing env variables while adding UI-configured ones
-- **Priority System**: UI-configured variables override provider settings when explicitly set
-- **Safety**: Prevents accidental loss of ANTHROPIC_* environment variables
+### Backend Debugging
+- Use `cargo check` for compilation issues
+- Enable debug logging with `env_logger`
+- Check Tauri's console output for command execution
+- Use `cargo test` for unit test validation
 
-### Project Encoding Fixes
-- **Bug Resolution**: Fixed duplicate project creation due to encoding mismatch
-- **Standardization**: Now uses single-dash encoding to match Claude CLI exactly
-- **Compatibility**: Handles both legacy (double-dash) and standard formats
-- **Recovery**: Enhanced project recovery system with intelligent format detection
-
-## Key Development Insights
-
-### Provider Management Architecture
-The provider management system underwent major architectural changes:
-1. **Legacy System**: Stored presets in separate `providers.json` file
-2. **Current System**: Presets still in `providers.json` for UI convenience, but active configuration in `settings.json` 
-3. **Claude CLI Compliance**: Full compatibility with official Claude CLI configuration format
-
-### Event System Debugging
-When debugging session issues, the event listener pattern is critical:
-- ClaudeCodeSession.tsx uses inline listeners that switch from generic to session-specific
-- Always check browser console for listener setup and cleanup logs
-- Session ID detection from system.init messages is the key switching trigger
-
-### Build System Notes
-- Always use production builds for testing (`bun run tauri build`)
-- Development mode (`tauri dev`) may have different behavior than production
-- Fast builds (`--profile dev-release`) useful for iteration but not final testing
-- Windows-specific: Process file locking may require killing existing processes before rebuild
+### Common Issues
+- **Build Failures**: Often related to Rust toolchain or Node.js version mismatches
+- **CLI Integration**: Verify Claude CLI installation and PATH configuration
+- **Process Management**: Check Windows permissions for subprocess creation
+- **Database Locks**: Ensure proper connection management in concurrent operations

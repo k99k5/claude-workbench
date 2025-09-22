@@ -29,6 +29,7 @@ import { LanguageSelector } from "./LanguageSelector";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useTheme } from "@/contexts/ThemeContext";
 import ProviderManager from "./ProviderManager";
+import { TranslationSettings } from "./TranslationSettings";
 
 interface SettingsProps {
   /**
@@ -442,12 +443,13 @@ export const Settings: React.FC<SettingsProps> = ({
       ) : (
         <div className="flex-1 overflow-y-auto p-4">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid grid-cols-7 w-full">
+            <TabsList className="grid grid-cols-8 w-full">
               <TabsTrigger value="general">{t('settings.general')}</TabsTrigger>
               <TabsTrigger value="permissions">权限</TabsTrigger>
               <TabsTrigger value="environment">环境</TabsTrigger>
               <TabsTrigger value="hooks">钩子</TabsTrigger>
               <TabsTrigger value="commands">命令</TabsTrigger>
+              <TabsTrigger value="translation">翻译</TabsTrigger>
               <TabsTrigger value="provider">代理商</TabsTrigger>
               <TabsTrigger value="storage">{t('settings.storage')}</TabsTrigger>
             </TabsList>
@@ -904,11 +906,15 @@ export const Settings: React.FC<SettingsProps> = ({
               </Card>
             </TabsContent>
             
+            {/* Translation Tab */}
+            <TabsContent value="translation">
+              <TranslationSettings />
+            </TabsContent>
+            
             {/* Provider Tab */}
             <TabsContent value="provider">
               <ProviderManager onBack={() => {}} />
             </TabsContent>
-            
             
             {/* Storage Tab */}
             <TabsContent value="storage">

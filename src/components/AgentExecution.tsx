@@ -68,6 +68,12 @@ export interface ClaudeStreamMessage {
   };
   sentAt?: string;      // ISO timestamp when message was sent (for user messages)
   receivedAt?: string;  // ISO timestamp when message was received (for assistant/system messages)
+  translationMeta?: {   // Translation metadata
+    wasTranslated: boolean;
+    detectedLanguage: string;
+    translatedText?: string;
+    originalText?: string;
+  };
   [key: string]: any;
 }
 
