@@ -1,7 +1,7 @@
 import React, { useState } from "react";
-import { 
-  CheckCircle2, 
-  Circle, 
+import {
+  CheckCircle2,
+  Circle,
   Clock,
   FolderOpen,
   FileText,
@@ -37,6 +37,7 @@ import {
   type LucideIcon,
   Sparkles,
   Bot,
+  Brain,
   Zap,
   FileCode,
   Folder,
@@ -64,11 +65,52 @@ import { open } from "@tauri-apps/plugin-shell";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { motion, AnimatePresence } from "framer-motion";
+import { translationMiddleware } from '@/lib/translationMiddleware';
 
 /**
- * Widget for TodoWrite tool - displays a beautiful TODO list
+ * Helper function to translate tool widget content if translation is enabled
+ */
+const useToolContentTranslation = () => {
+  const [translatedContent, setTranslatedContent] = React.useState<Map<string, string>>(new Map());
+
+  const translateContent = React.useCallback(async (content: string, cacheKey: string) => {
+    if (translatedContent.has(cacheKey)) {
+      return translatedContent.get(cacheKey)!;
+    }
+
+    try {
+      const isEnabled = await translationMiddleware.isEnabled();
+      if (!isEnabled) {
+        return content;
+      }
+
+      // Only translate if the content appears to be in English
+      const detectedLanguage = await translationMiddleware.detectLanguage(content);
+      if (detectedLanguage === 'en') {
+        const result = await translationMiddleware.translateClaudeResponse(content, true);
+        if (result.wasTranslated) {
+          setTranslatedContent(prev => new Map(prev).set(cacheKey, result.translatedText));
+          return result.translatedText;
+        }
+      }
+
+      return content;
+    } catch (error) {
+      console.error('[ToolWidgets] Translation failed for content:', error);
+      return content;
+    }
+  }, [translatedContent]);
+
+  return { translateContent };
+};
+
+/**
+ * Widget for TodoWrite tool - displays a beautiful TODO list with translation support
  */
 export const TodoWidget: React.FC<{ todos: any[]; result?: any }> = ({ todos, result: _result }) => {
+  const { translateContent } = useToolContentTranslation();
+  const [translatedTodos, setTranslatedTodos] = React.useState<Map<string, string>>(new Map());
+
   const statusIcons = {
     completed: <CheckCircle2 className="h-4 w-4 text-green-500" />,
     in_progress: <Clock className="h-4 w-4 text-blue-500 animate-pulse" />,
@@ -81,6 +123,27 @@ export const TodoWidget: React.FC<{ todos: any[]; result?: any }> = ({ todos, re
     low: "bg-green-500/10 text-green-500 border-green-500/20"
   };
 
+  // Translate todo content on mount and when todos change
+  React.useEffect(() => {
+    const translateTodos = async () => {
+      const translations = new Map<string, string>();
+
+      for (const [idx, todo] of todos.entries()) {
+        if (todo.content) {
+          const cacheKey = `todo-${idx}-${todo.content.substring(0, 50)}`;
+          const translatedContent = await translateContent(todo.content, cacheKey);
+          translations.set(cacheKey, translatedContent);
+        }
+      }
+
+      setTranslatedTodos(translations);
+    };
+
+    if (todos.length > 0) {
+      translateTodos();
+    }
+  }, [todos, translateContent]);
+
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 mb-3">
@@ -88,35 +151,40 @@ export const TodoWidget: React.FC<{ todos: any[]; result?: any }> = ({ todos, re
         <span className="text-sm font-medium">任务列表</span>
       </div>
       <div className="space-y-2">
-        {todos.map((todo, idx) => (
-          <div
-            key={todo.id || idx}
-            className={cn(
-              "flex items-start gap-3 p-3 rounded-lg border bg-card/50",
-              todo.status === "completed" && "opacity-60"
-            )}
-          >
-            <div className="mt-0.5">
-              {statusIcons[todo.status as keyof typeof statusIcons] || statusIcons.pending}
-            </div>
-            <div className="flex-1 space-y-1">
-              <p className={cn(
-                "text-sm",
-                todo.status === "completed" && "line-through"
-              )}>
-                {todo.content}
-              </p>
-              {todo.priority && (
-                <Badge 
-                  variant="outline" 
-                  className={cn("text-xs", priorityColors[todo.priority as keyof typeof priorityColors])}
-                >
-                  {todo.priority}
-                </Badge>
+        {todos.map((todo, idx) => {
+          const cacheKey = `todo-${idx}-${todo.content?.substring(0, 50) || ''}`;
+          const displayContent = translatedTodos.get(cacheKey) || todo.content;
+
+          return (
+            <div
+              key={todo.id || idx}
+              className={cn(
+                "flex items-start gap-3 p-3 rounded-lg border bg-card/50",
+                todo.status === "completed" && "opacity-60"
               )}
+            >
+              <div className="mt-0.5">
+                {statusIcons[todo.status as keyof typeof statusIcons] || statusIcons.pending}
+              </div>
+              <div className="flex-1 space-y-1">
+                <p className={cn(
+                  "text-sm",
+                  todo.status === "completed" && "line-through"
+                )}>
+                  {displayContent}
+                </p>
+                {todo.priority && (
+                  <Badge
+                    variant="outline"
+                    className={cn("text-xs", priorityColors[todo.priority as keyof typeof priorityColors])}
+                  >
+                    {todo.priority}
+                  </Badge>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -1584,12 +1652,56 @@ export const CommandOutputWidget: React.FC<{
 };
 
 /**
- * Widget for AI-generated summaries
+ * Widget for AI-generated summaries with translation support
  */
-export const SummaryWidget: React.FC<{ 
+export const SummaryWidget: React.FC<{
   summary: string;
   leafUuid?: string;
-}> = ({ summary, leafUuid }) => {
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_tokens?: number;
+    cache_read_tokens?: number;
+  };
+}> = ({ summary, leafUuid, usage }) => {
+  const { translateContent } = useToolContentTranslation();
+  const [translatedSummary, setTranslatedSummary] = React.useState<string>('');
+
+  // Translate summary content on mount and when content changes
+  React.useEffect(() => {
+    const translateSummary = async () => {
+      if (summary?.trim()) {
+        const cacheKey = `summary-${summary.substring(0, 100)}`;
+        const translated = await translateContent(summary, cacheKey);
+        setTranslatedSummary(translated);
+      }
+    };
+
+    translateSummary();
+  }, [summary, translateContent]);
+
+  // Use translated content if available, fallback to original
+  const displaySummary = translatedSummary || summary;
+
+  // Format token usage similar to StreamMessage formatUsageBreakdown
+  const formatTokenUsage = (usage: any) => {
+    if (!usage) return null;
+
+    const { input_tokens = 0, output_tokens = 0, cache_creation_tokens = 0, cache_read_tokens = 0 } = usage;
+    const parts = [
+      { label: "in", value: input_tokens },
+      { label: "out", value: output_tokens },
+      { label: "creation", value: cache_creation_tokens },
+      { label: "read", value: cache_read_tokens },
+    ];
+
+    const breakdown = parts
+      .map(({ label, value }) => `${value} ${label}`)
+      .join(", ");
+
+    return `Tokens: ${breakdown}`;
+  };
+
   return (
     <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 overflow-hidden">
       <div className="px-4 py-3 flex items-start gap-3">
@@ -1600,7 +1712,15 @@ export const SummaryWidget: React.FC<{
         </div>
         <div className="flex-1 space-y-1">
           <div className="text-xs font-medium text-blue-600 dark:text-blue-400">AI 总结</div>
-          <p className="text-sm text-foreground">{summary}</p>
+          <p className="text-sm text-foreground">{displaySummary}</p>
+
+          {/* Token usage display */}
+          {usage && (
+            <div className="text-xs text-foreground/70 mt-2">
+              {formatTokenUsage(usage)}
+            </div>
+          )}
+
           {leafUuid && (
             <div className="text-xs text-muted-foreground mt-2">
               ID: <code className="font-mono">{leafUuid.slice(0, 8)}...</code>
@@ -2319,19 +2439,60 @@ export const WebSearchWidget: React.FC<{
 };
 
 /**
- * Widget for displaying AI thinking/reasoning content
+ * Widget for displaying AI thinking/reasoning content with translation support
  * Directly shows thinking results when available
  */
-export const ThinkingWidget: React.FC<{ 
+export const ThinkingWidget: React.FC<{
   thinking: string;
   signature?: string;
-}> = ({ thinking }) => {
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_tokens?: number;
+    cache_read_tokens?: number;
+  };
+}> = ({ thinking, usage }) => {
+  const { translateContent } = useToolContentTranslation();
+  const [translatedThinking, setTranslatedThinking] = React.useState<string>('');
+
   // Strip whitespace from thinking content
   const trimmedThinking = thinking.trim();
-  
+
   // Determine display state based on content
   const hasContent = trimmedThinking.length > 0;
-  
+
+  // Translate thinking content on mount and when content changes
+  React.useEffect(() => {
+    const translateThinking = async () => {
+      if (hasContent) {
+        const cacheKey = `thinking-${trimmedThinking.substring(0, 100)}`;
+        const translated = await translateContent(trimmedThinking, cacheKey);
+        setTranslatedThinking(translated);
+      }
+    };
+
+    translateThinking();
+  }, [trimmedThinking, hasContent, translateContent]);
+
+  // Format token usage for thinking content
+  const formatThinkingTokens = (usage: any) => {
+    if (!usage) return null;
+
+    const { input_tokens = 0, output_tokens = 0, cache_creation_tokens = 0, cache_read_tokens = 0 } = usage;
+    const parts = [
+      { label: "in", value: input_tokens },
+      { label: "out", value: output_tokens },
+      { label: "creation", value: cache_creation_tokens },
+      { label: "read", value: cache_read_tokens },
+    ];
+
+    const breakdown = parts
+      .map(({ label, value }) => `${value} ${label}`)
+      .join(", ");
+
+    return `Tokens: ${breakdown}`;
+  };
+
   // When there's no content, show "thinking in progress" state
   if (!hasContent) {
     return (
@@ -2349,12 +2510,28 @@ export const ThinkingWidget: React.FC<{
     );
   }
 
-  // When there's content, directly show the thinking result without title bar
+  // When there's content, show the translated thinking result with token usage
+  const displayContent = translatedThinking || trimmedThinking;
+
   return (
     <div className="rounded-lg border border-green-500/20 bg-green-500/5 overflow-hidden">
       <div className="p-4">
+        <div className="flex items-start justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <Brain className="h-4 w-4 text-green-600" />
+            <span className="text-sm font-medium text-green-700 dark:text-green-400">思考过程</span>
+          </div>
+
+          {/* Token usage display for thinking content */}
+          {usage && (
+            <div className="text-xs text-green-600/80 dark:text-green-400/80">
+              {formatThinkingTokens(usage)}
+            </div>
+          )}
+        </div>
+
         <pre className="text-xs font-mono text-gray-600 dark:text-gray-400 whitespace-pre-wrap bg-gray-500/5 p-3 rounded-lg italic leading-relaxed">
-          {trimmedThinking}
+          {displayContent}
         </pre>
       </div>
     </div>

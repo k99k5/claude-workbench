@@ -12,6 +12,8 @@ import type { AgentRun } from '@/lib/api';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { StreamMessage } from './StreamMessage';
 import { ErrorBoundary } from './ErrorBoundary';
+import { InlineTokenCounter } from './TokenCounter';
+import { tokenExtractor } from '@/lib/tokenExtractor';
 
 interface SessionOutputViewerProps {
   session: AgentRun;
@@ -28,11 +30,15 @@ export interface ClaudeStreamMessage {
     usage?: {
       input_tokens: number;
       output_tokens: number;
+      cache_creation_tokens?: number;
+      cache_read_tokens?: number;
     };
   };
   usage?: {
     input_tokens: number;
     output_tokens: number;
+    cache_creation_tokens?: number;
+    cache_read_tokens?: number;
   };
   [key: string]: any;
 }
@@ -270,7 +276,9 @@ export function SessionOutputViewer({ session, onClose, className }: SessionOutp
           }
         }
         if (msg.message.usage) {
-          markdown += `*Tokens: ${msg.message.usage.input_tokens} in, ${msg.message.usage.output_tokens} out*\n\n`;
+          const tokens = tokenExtractor.extract({ message: { usage: msg.message.usage } });
+          const display = tokenExtractor.format(tokens, { showDetails: true });
+          markdown += `*${display}*\n\n`;
         }
       } else if (msg.type === "user" && msg.message) {
         markdown += `## User\n\n`;
@@ -400,6 +408,13 @@ export function SessionOutputViewer({ session, onClose, className }: SessionOutp
                     <span className="text-xs text-muted-foreground">
                       {messages.length} messages
                     </span>
+                    {messages.length > 0 && (
+                      <InlineTokenCounter
+                        tokens={tokenExtractor.sessionTotal(messages)}
+                        model={session.model}
+                        className="text-xs"
+                      />
+                    )}
                   </div>
                 </div>
               </div>

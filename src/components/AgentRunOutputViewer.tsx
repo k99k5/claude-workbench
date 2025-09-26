@@ -28,6 +28,8 @@ import { ErrorBoundary } from './ErrorBoundary';
 import { formatISOTimestamp } from '@/lib/date-utils';
 import { AGENT_ICONS } from './CCAgents';
 import type { ClaudeStreamMessage } from './AgentExecution';
+import { tokenExtractor } from '@/lib/tokenExtractor';
+import { translationMiddleware } from '@/lib/translationMiddleware';
 
 interface AgentRunOutputViewerProps {
   /**
@@ -69,6 +71,12 @@ export function AgentRunOutputViewer({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+
+  // Helper function to show translated toast
+  const showTranslatedToast = async (message: string, type: "success" | "error") => {
+    const translatedMessage = await translationMiddleware.translateErrorMessage(message);
+    setToast({ message: translatedMessage, type });
+  };
   const [copyPopoverOpen, setCopyPopoverOpen] = useState(false);
   const [hasUserScrolled, setHasUserScrolled] = useState(false);
   
@@ -236,7 +244,7 @@ export function AgentRunOutputViewer({
       }
     } catch (error) {
       console.error('Failed to load agent output:', error);
-      setToast({ message: 'Failed to load agent output', type: 'error' });
+      await showTranslatedToast('Failed to load agent output', 'error');
     } finally {
       setLoading(false);
     }
@@ -282,16 +290,16 @@ export function AgentRunOutputViewer({
 
       const errorUnlisten = await listen<string>(`agent-error:${run.id}`, (event) => {
         console.error("[AgentRunOutputViewer] Agent error:", event.payload);
-        setToast({ message: event.payload, type: 'error' });
+        showTranslatedToast(event.payload, 'error');
       });
 
       const completeUnlisten = await listen<boolean>(`agent-complete:${run.id}`, () => {
-        setToast({ message: 'Agent execution completed', type: 'success' });
+        showTranslatedToast('Agent execution completed', 'success');
         // Don't set status here as the parent component should handle it
       });
 
       const cancelUnlisten = await listen<boolean>(`agent-cancelled:${run.id}`, () => {
-        setToast({ message: 'Agent execution was cancelled', type: 'error' });
+        showTranslatedToast('Agent execution was cancelled', 'error');
       });
 
       unlistenRefs.current = [outputUnlisten, errorUnlisten, completeUnlisten, cancelUnlisten];
@@ -305,13 +313,13 @@ export function AgentRunOutputViewer({
     const jsonl = rawJsonlOutput.join('\n');
     await navigator.clipboard.writeText(jsonl);
     setCopyPopoverOpen(false);
-    setToast({ message: 'Output copied as JSONL', type: 'success' });
+    showTranslatedToast('Output copied as JSONL', 'success');
   };
 
   const handleCopyAsMarkdown = async () => {
     let markdown = `# Agent Execution: ${run.agent_name}\n\n`;
     markdown += `**Task:** ${run.task}\n`;
-    markdown += `**Model:** ${run.model === 'opus' ? 'Claude 4 Opus' : 'Claude 4 Sonnet'}\n`;
+    markdown += `**Model:** ${run.model === 'opus' ? 'Claude 4.1 Opus' : 'Claude 4 Sonnet'}\n`;
     markdown += `**Date:** ${formatISOTimestamp(run.created_at)}\n`;
     if (run.metrics?.duration_ms) markdown += `**Duration:** ${(run.metrics.duration_ms / 1000).toFixed(2)}s\n`;
     if (run.metrics?.total_tokens) markdown += `**Total Tokens:** ${run.metrics.total_tokens}\n`;
@@ -337,7 +345,9 @@ export function AgentRunOutputViewer({
           }
         }
         if (msg.message.usage) {
-          markdown += `*Tokens: ${msg.message.usage.input_tokens} in, ${msg.message.usage.output_tokens} out*\n\n`;
+          const tokens = tokenExtractor.extract({ message: { usage: msg.message.usage } });
+          const display = tokenExtractor.format(tokens, { showDetails: true });
+          markdown += `*${display}*\n\n`;
         }
       } else if (msg.type === "user" && msg.message) {
         markdown += `## User\n\n`;
@@ -362,7 +372,7 @@ export function AgentRunOutputViewer({
 
     await navigator.clipboard.writeText(markdown);
     setCopyPopoverOpen(false);
-    setToast({ message: 'Output copied as Markdown', type: 'success' });
+    showTranslatedToast('Output copied as Markdown', 'success');
   };
 
   const handleRefresh = async () => {
@@ -383,7 +393,7 @@ export function AgentRunOutputViewer({
       
       if (success) {
         console.log(`[AgentRunOutputViewer] Successfully stopped agent session ${run.id}`);
-        setToast({ message: 'Agent execution stopped', type: 'success' });
+        showTranslatedToast('Agent execution stopped', 'success');
         
         // Clean up listeners
         unlistenRefs.current.forEach(unlisten => unlisten());
@@ -411,7 +421,7 @@ export function AgentRunOutputViewer({
         }, 1000);
       } else {
         console.warn(`[AgentRunOutputViewer] Failed to stop agent session ${run.id} - it may have already finished`);
-        setToast({ message: 'Failed to stop agent - it may have already finished', type: 'error' });
+        showTranslatedToast('Failed to stop agent - it may have already finished', 'error');
       }
     } catch (err) {
       console.error('[AgentRunOutputViewer] Failed to stop agent:', err);
@@ -505,10 +515,7 @@ export function AgentRunOutputViewer({
 
   const formatTokens = (tokens?: number) => {
     if (!tokens) return "0";
-    if (tokens >= 1000) {
-      return `${(tokens / 1000).toFixed(1)}k`;
-    }
-    return tokens.toString();
+    return tokenExtractor.format({ input_tokens: 0, output_tokens: 0, cache_creation_tokens: 0, cache_read_tokens: 0, total_tokens: tokens }, { compact: true });
   };
 
   return (
@@ -549,7 +556,7 @@ export function AgentRunOutputViewer({
                   </p>
                   <div className="flex items-center gap-3 text-xs text-muted-foreground mt-2">
                     <Badge variant="outline" className="text-xs">
-                      {run.model === 'opus' ? 'Claude 4 Opus' : 'Claude 4 Sonnet'}
+                      {run.model === 'opus' ? 'Claude 4.1 Opus' : 'Claude 4 Sonnet'}
                     </Badge>
                     <div className="flex items-center gap-1">
                       <Clock className="h-3 w-3" />

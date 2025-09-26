@@ -4,6 +4,7 @@ use super::permission_config::{
     ClaudePermissionConfig, ClaudeExecutionConfig, PermissionMode,
     build_execution_args, DEVELOPMENT_TOOLS, SAFE_TOOLS, ALL_TOOLS
 };
+use super::agents::{AgentDb, insert_usage_entry};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -35,10 +36,12 @@ impl Default for ClaudeProcessState {
 
 /// Maps frontend model IDs to Claude CLI model aliases
 /// Converts frontend-friendly model names to official Claude Code model identifiers
+/// Updated to use Claude 4.1 Opus (released August 2025) as the latest Opus model
 fn map_model_to_claude_alias(model: &str) -> String {
     match model {
         "sonnet1m" => "sonnet[1m]".to_string(),
         "sonnet" => "sonnet".to_string(),
+        // Use 'opus' alias which automatically resolves to latest Opus (Claude 4.1)
         "opus" => "opus".to_string(),
         // Pass through any other model names unchanged (for future compatibility)
         _ => model.to_string(),
@@ -424,6 +427,10 @@ fn create_command_with_env(program: &str) -> Command {
             || key == "NVM_BIN"
             || key == "HOMEBREW_PREFIX"
             || key == "HOMEBREW_CELLAR"
+            // 🔥 修复：添加 ANTHROPIC 和 Claude Code 相关环境变量
+            || key.starts_with("ANTHROPIC_")
+            || key.starts_with("CLAUDE_CODE_")
+            || key == "API_TIMEOUT_MS"
         {
             log::debug!("Inheriting env var: {}={}", key, value);
             tokio_cmd.env(&key, &value);
@@ -453,8 +460,9 @@ fn create_system_command(
     claude_path: &str,
     args: Vec<String>,
     project_path: &str,
+    model: Option<&str>,
 ) -> Result<Command, String> {
-    create_windows_command(claude_path, args, project_path)
+    create_windows_command(claude_path, args, project_path, model)
 }
 
 /// Create a Windows command
@@ -462,23 +470,30 @@ fn create_windows_command(
     claude_path: &str,
     args: Vec<String>,
     project_path: &str,
+    model: Option<&str>,
 ) -> Result<Command, String> {
     let mut cmd = create_command_with_env(claude_path);
-    
+
+    // 🔥 修复：设置ANTHROPIC_MODEL环境变量以确保模型选择生效
+    if let Some(model_name) = model {
+        log::info!("Setting ANTHROPIC_MODEL environment variable to: {}", model_name);
+        cmd.env("ANTHROPIC_MODEL", model_name);
+    }
+
     // Add all arguments
     cmd.args(&args);
-    
+
     // Set working directory
     cmd.current_dir(project_path);
-    
+
     // Configure stdio for capturing output
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
-    
+
     // On Windows, ensure the command runs without creating a console window
     #[cfg(target_os = "windows")]
     cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    
+
     Ok(cmd)
 }
 
@@ -1452,6 +1467,12 @@ pub async fn load_session_history(
         return Err(format!("Session file not found: {}", session_id));
     }
 
+    // Get file modification time as base timestamp
+    let file_metadata = fs::metadata(&session_path)
+        .map_err(|e| format!("Failed to read file metadata: {}", e))?;
+    let base_time = file_metadata.modified()
+        .unwrap_or_else(|_| std::time::SystemTime::now());
+
     let file =
         fs::File::open(&session_path).map_err(|e| format!("Failed to open session file: {}", e))?;
 
@@ -1462,6 +1483,37 @@ pub async fn load_session_history(
         if let Ok(line) = line {
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
                 messages.push(json);
+            }
+        }
+    }
+
+    // Add timestamps to historical messages that don't have them
+    let messages_count = messages.len();
+    for (i, message) in messages.iter_mut().enumerate() {
+        let message_type = message.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+        // Calculate timestamp for this message (5 second intervals, older messages get earlier timestamps)
+        let time_offset = (messages_count - i - 1) as u64 * 5; // 5 seconds between messages
+        let message_time = base_time - std::time::Duration::from_secs(time_offset);
+        let timestamp_iso = chrono::DateTime::<chrono::Utc>::from(message_time).to_rfc3339();
+
+        // Set appropriate timestamp fields based on message type, only if they don't exist
+        match message_type {
+            "user" => {
+                if !message.get("sentAt").is_some() {
+                    message["sentAt"] = serde_json::Value::String(timestamp_iso);
+                }
+            }
+            "assistant" | "system" | "result" => {
+                if !message.get("receivedAt").is_some() {
+                    message["receivedAt"] = serde_json::Value::String(timestamp_iso);
+                }
+            }
+            _ => {
+                // For unknown types, add receivedAt
+                if !message.get("receivedAt").is_some() {
+                    message["receivedAt"] = serde_json::Value::String(timestamp_iso);
+                }
             }
         }
     }
@@ -1506,7 +1558,7 @@ pub async fn execute_claude_code(
     let args = build_execution_args(&execution_config, &prompt, &mapped_model, escape_prompt_for_cli);
 
     // Create command
-    let cmd = create_system_command(&claude_path, args, &project_path)?;
+    let cmd = create_system_command(&claude_path, args, &project_path, Some(&mapped_model))?;
     spawn_claude_process(app, cmd, prompt, model, project_path).await
 }
 
@@ -1542,12 +1594,12 @@ pub async fn continue_claude_code(
     // 使用新的参数构建函数，添加 -c 标志用于继续对话（先映射模型名称）
     let mapped_model = map_model_to_claude_alias(&model);
     let mut args = build_execution_args(&execution_config, &prompt, &mapped_model, escape_prompt_for_cli);
-    
+
     // 在开头插入 -c 标志
     args.insert(0, "-c".to_string());
 
     // Create command
-    let cmd = create_system_command(&claude_path, args, &project_path)?;
+    let cmd = create_system_command(&claude_path, args, &project_path, Some(&mapped_model))?;
     spawn_claude_process(app, cmd, prompt, model, project_path).await
 }
 
@@ -1602,7 +1654,7 @@ pub async fn resume_claude_code(
     log::info!("Resume command: claude {}", args.join(" "));
 
     // Create command
-    let cmd = create_system_command(&claude_path, args, &project_path)?;
+    let cmd = create_system_command(&claude_path, args, &project_path, Some(&mapped_model))?;
     
     // Try to spawn the process - if it fails, fall back to continue mode
     match spawn_claude_process(app.clone(), cmd, prompt.clone(), model.clone(), project_path.clone()).await {
@@ -1803,6 +1855,9 @@ async fn spawn_claude_process(app: AppHandle, mut cmd: Command, prompt: String, 
         *current_process = Some(child);
     }
 
+    // Check if auto-compact state is available
+    let auto_compact_available = app.try_state::<crate::commands::context_manager::AutoCompactState>().is_some();
+
     // Spawn tasks to read stdout and stderr
     let app_handle = app.clone();
     let session_id_holder_clone = session_id_holder.clone();
@@ -1825,7 +1880,20 @@ async fn spawn_claude_process(app: AppHandle, mut cmd: Command, prompt: String, 
                         if session_id_guard.is_none() {
                             *session_id_guard = Some(claude_session_id.to_string());
                             log::info!("Extracted Claude session ID: {}", claude_session_id);
-                            
+
+                            // Register with auto-compact manager
+                            if auto_compact_available {
+                                if let Some(auto_compact_state) = app_handle.try_state::<crate::commands::context_manager::AutoCompactState>() {
+                                    if let Err(e) = auto_compact_state.0.register_session(
+                                    claude_session_id.to_string(),
+                                    project_path_clone.clone(),
+                                    model_clone.clone(),
+                                ) {
+                                    log::warn!("Failed to register session with auto-compact manager: {}", e);
+                                }
+                                }
+                            }
+
                             // Now register with ProcessRegistry using Claude's session ID
                             match registry_clone.register_claude_session(
                                 claude_session_id.to_string(),
@@ -1838,7 +1906,7 @@ async fn spawn_claude_process(app: AppHandle, mut cmd: Command, prompt: String, 
                                     log::info!("Registered Claude session with run_id: {}", run_id);
                                     let mut run_id_guard = run_id_holder_clone.lock().unwrap();
                                     *run_id_guard = Some(run_id);
-                                    
+
                                     // Claude CLI already creates the project folder and session files automatically
                                     // We don't need to create them manually, which was causing duplicate projects
                                     // The Claude CLI handles all project management internally
@@ -1846,6 +1914,72 @@ async fn spawn_claude_process(app: AppHandle, mut cmd: Command, prompt: String, 
                                 }
                                 Err(e) => {
                                     log::error!("Failed to register Claude session: {}", e);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Check for usage information and update context tracking
+                if let Some(usage) = msg.get("usage") {
+                    if let (Some(input_tokens), Some(output_tokens)) =
+                        (usage.get("input_tokens").and_then(|t| t.as_u64()),
+                         usage.get("output_tokens").and_then(|t| t.as_u64())) {
+
+                        let total_tokens = (input_tokens + output_tokens) as usize;
+
+                        // Extract cache tokens if available
+                        let cache_creation_tokens = usage.get("cache_creation_input_tokens").and_then(|t| t.as_u64());
+                        let cache_read_tokens = usage.get("cache_read_input_tokens").and_then(|t| t.as_u64());
+
+                        // Store usage data in database for real-time token statistics
+                        let session_id_for_update = {
+                            session_id_holder_clone.lock().unwrap().as_ref().cloned()
+                        };
+
+                        if let Some(session_id_str) = &session_id_for_update {
+                            // Store real-time usage data in database
+                            if let Some(agent_db) = app_handle.try_state::<AgentDb>() {
+                                let timestamp = chrono::Utc::now().to_rfc3339();
+                                let model = msg.get("model")
+                                    .and_then(|m| m.as_str())
+                                    .unwrap_or(&model_clone);
+
+                                if let Err(e) = insert_usage_entry(
+                                    &agent_db,
+                                    session_id_str,
+                                    &timestamp,
+                                    model,
+                                    input_tokens,
+                                    output_tokens,
+                                    cache_creation_tokens,
+                                    cache_read_tokens,
+                                    Some(&project_path_clone),
+                                ) {
+                                    log::warn!("Failed to store usage data in database: {}", e);
+                                }
+                            }
+
+                            // Update auto-compact manager with token count
+                            if auto_compact_available {
+                                if let Some(auto_compact_state) = app_handle.try_state::<crate::commands::context_manager::AutoCompactState>() {
+                                    let auto_compact_state_clone = auto_compact_state.inner().clone();
+                                    let session_id_for_compact = session_id_str.clone();
+
+                                    // Spawn async task to avoid blocking main output loop
+                                    tokio::spawn(async move {
+                                        match auto_compact_state_clone.0.update_session_tokens(&session_id_for_compact, total_tokens).await {
+                                            Ok(compaction_triggered) => {
+                                                if compaction_triggered {
+                                                    log::info!("Auto-compaction triggered for session {}", session_id_for_compact);
+                                                    // The actual compaction will be handled by the background monitoring thread
+                                                }
+                                            }
+                                            Err(e) => {
+                                                log::warn!("Failed to update session tokens for auto-compact: {}", e);
+                                            }
+                                        }
+                                    });
                                 }
                             }
                         }
@@ -3397,7 +3531,7 @@ async fn find_claude_executable() -> Result<String, String> {
 
 /// 获取当前Claude执行配置
 #[tauri::command]
-pub async fn get_claude_execution_config(app: AppHandle) -> Result<ClaudeExecutionConfig, String> {
+pub async fn get_claude_execution_config(_app: AppHandle) -> Result<ClaudeExecutionConfig, String> {
     let claude_dir = get_claude_dir()
         .map_err(|e| format!("Failed to get Claude directory: {}", e))?;
     let config_file = claude_dir.join("execution_config.json");
@@ -3430,7 +3564,7 @@ pub async fn get_claude_execution_config(app: AppHandle) -> Result<ClaudeExecuti
 /// 更新Claude执行配置
 #[tauri::command]
 pub async fn update_claude_execution_config(
-    app: AppHandle,
+    _app: AppHandle,
     config: ClaudeExecutionConfig,
 ) -> Result<(), String> {
     let claude_dir = get_claude_dir()

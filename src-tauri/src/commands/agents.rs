@@ -136,6 +136,24 @@ impl AgentRunMetrics {
                     {
                         total_tokens += output_tokens;
                     }
+                    // Include cache tokens in total calculation - support both field name formats
+                    // Format 1: cache_creation_input_tokens (from Claude CLI)
+                    if let Some(cache_creation_tokens) = usage.get("cache_creation_input_tokens").and_then(|t| t.as_i64()) {
+                        total_tokens += cache_creation_tokens;
+                    }
+                    // Format 2: cache_creation_tokens (alternative format)
+                    else if let Some(cache_creation_tokens) = usage.get("cache_creation_tokens").and_then(|t| t.as_i64()) {
+                        total_tokens += cache_creation_tokens;
+                    }
+
+                    // Format 1: cache_read_input_tokens (from Claude CLI)
+                    if let Some(cache_read_tokens) = usage.get("cache_read_input_tokens").and_then(|t| t.as_i64()) {
+                        total_tokens += cache_read_tokens;
+                    }
+                    // Format 2: cache_read_tokens (alternative format)
+                    else if let Some(cache_read_tokens) = usage.get("cache_read_tokens").and_then(|t| t.as_i64()) {
+                        total_tokens += cache_read_tokens;
+                    }
                 }
 
                 // Extract cost information
@@ -329,6 +347,25 @@ pub fn init_database(app: &AppHandle) -> SqliteResult<Connection> {
             value TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )",
+        [],
+    )?;
+
+    // Create usage_entries table for real-time token usage tracking
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS usage_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            model TEXT NOT NULL,
+            input_tokens INTEGER DEFAULT 0,
+            output_tokens INTEGER DEFAULT 0,
+            cache_creation_tokens INTEGER DEFAULT 0,
+            cache_read_tokens INTEGER DEFAULT 0,
+            total_tokens INTEGER DEFAULT 0,
+            cost REAL DEFAULT 0.0,
+            project_path TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )",
         [],
     )?;
@@ -2378,4 +2415,82 @@ pub async fn load_agent_session_history(
     } else {
         Err(format!("Session file not found: {}", session_id))
     }
+}
+
+/// Insert real-time usage data into the database
+pub fn insert_usage_entry(
+    db: &AgentDb,
+    session_id: &str,
+    timestamp: &str,
+    model: &str,
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_creation_tokens: Option<u64>,
+    cache_read_tokens: Option<u64>,
+    project_path: Option<&str>,
+) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+
+    let cache_creation = cache_creation_tokens.unwrap_or(0);
+    let cache_read = cache_read_tokens.unwrap_or(0);
+    let total_tokens = input_tokens + output_tokens + cache_creation + cache_read;
+
+    // Calculate cost based on model (simplified version)
+    let cost = calculate_usage_cost(model, input_tokens, output_tokens, cache_creation, cache_read);
+
+    conn.execute(
+        "INSERT INTO usage_entries (
+            session_id, timestamp, model, input_tokens, output_tokens,
+            cache_creation_tokens, cache_read_tokens, total_tokens, cost, project_path
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        rusqlite::params![
+            session_id,
+            timestamp,
+            model,
+            input_tokens as i64,
+            output_tokens as i64,
+            cache_creation as i64,
+            cache_read as i64,
+            total_tokens as i64,
+            cost,
+            project_path.unwrap_or("")
+        ],
+    ).map_err(|e| e.to_string())?;
+
+    log::debug!(
+        "Inserted usage entry: session={}, tokens={}+{}={}, cost={}",
+        session_id, input_tokens, output_tokens, total_tokens, cost
+    );
+
+    Ok(())
+}
+
+/// Calculate cost based on model and token usage (simplified version)
+fn calculate_usage_cost(
+    model: &str,
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_creation_tokens: u64,
+    cache_read_tokens: u64,
+) -> f64 {
+    // Pricing per million tokens (simplified version - should match usage.rs pricing)
+    let (input_price, output_price, cache_write_price, cache_read_price) = match model {
+        m if m.contains("opus-4") || m.contains("claude-opus-4") =>
+            (15.0, 75.0, 18.75, 1.125), // Opus 4 pricing
+        m if m.contains("sonnet-4") || m.contains("claude-sonnet-4") =>
+            (3.0, 15.0, 3.75, 0.225),   // Sonnet 4 pricing
+        m if m.contains("haiku-4") || m.contains("claude-haiku-4") =>
+            (0.25, 1.25, 0.3125, 0.01875), // Haiku 4 pricing
+        m if m.contains("sonnet-3.5") || m.contains("claude-3-5-sonnet") =>
+            (3.0, 15.0, 3.75, 0.225),   // Sonnet 3.5 pricing
+        m if m.contains("haiku-3.5") || m.contains("claude-3-5-haiku") =>
+            (0.25, 1.25, 0.3125, 0.01875), // Haiku 3.5 pricing
+        _ => (0.0, 0.0, 0.0, 0.0), // Unknown model
+    };
+
+    // Calculate cost (prices are per million tokens)
+    ((input_tokens as f64 * input_price) +
+     (output_tokens as f64 * output_price) +
+     (cache_creation_tokens as f64 * cache_write_price) +
+     (cache_read_tokens as f64 * cache_read_price)) / 1_000_000.0
 }

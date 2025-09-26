@@ -35,6 +35,7 @@ import { ExecutionControlBar } from "./ExecutionControlBar";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { AGENT_ICONS } from "./CCAgents";
+import { tokenExtractor } from "@/lib/tokenExtractor";
 import { HooksEditor } from "./HooksEditor";
 
 interface AgentExecutionProps {
@@ -60,11 +61,15 @@ export interface ClaudeStreamMessage {
     usage?: {
       input_tokens: number;
       output_tokens: number;
+      cache_creation_tokens?: number;
+      cache_read_tokens?: number;
     };
   };
   usage?: {
     input_tokens: number;
     output_tokens: number;
+    cache_creation_tokens?: number;
+    cache_read_tokens?: number;
   };
   sentAt?: string;      // ISO timestamp when message was sent (for user messages)
   receivedAt?: string;  // ISO timestamp when message was received (for assistant/system messages)
@@ -254,18 +259,10 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
     };
   }, [isRunning, executionStartTime]);
 
-  // Calculate total tokens from messages
+  // Calculate total tokens from messages using tokenExtractor
   useEffect(() => {
-    const tokens = messages.reduce((total, msg) => {
-      if (msg.message?.usage) {
-        return total + msg.message.usage.input_tokens + msg.message.usage.output_tokens;
-      }
-      if (msg.usage) {
-        return total + msg.usage.input_tokens + msg.usage.output_tokens;
-      }
-      return total;
-    }, 0);
-    setTotalTokens(tokens);
+    const totalTokens = tokenExtractor.sessionTotal(messages);
+    setTotalTokens(totalTokens.total_tokens);
   }, [messages]);
 
 
@@ -458,7 +455,7 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
   const handleCopyAsMarkdown = async () => {
     let markdown = `# Agent Execution: ${agent.name}\n\n`;
     markdown += `**Task:** ${task}\n`;
-    markdown += `**Model:** ${model === 'opus' ? 'Claude 4 Opus' : 'Claude 4 Sonnet'}\n`;
+    markdown += `**Model:** ${model === 'opus' ? 'Claude 4.1 Opus' : 'Claude 4 Sonnet'}\n`;
     markdown += `**Date:** ${new Date().toISOString()}\n\n`;
     markdown += `---\n\n`;
 
@@ -481,7 +478,9 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
           }
         }
         if (msg.message.usage) {
-          markdown += `*Tokens: ${msg.message.usage.input_tokens} in, ${msg.message.usage.output_tokens} out*\n\n`;
+          const tokens = tokenExtractor.extract({ message: { usage: msg.message.usage } });
+          const display = tokenExtractor.format(tokens, { showDetails: true });
+          markdown += `*${display}*\n\n`;
         }
       } else if (msg.type === "user" && msg.message) {
         markdown += `## User\n\n`;
@@ -511,8 +510,9 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
           markdown += `- **Turns:** ${msg.num_turns}\n`;
         }
         if (msg.usage) {
-          const total = msg.usage.input_tokens + msg.usage.output_tokens;
-          markdown += `- **Total Tokens:** ${total} (${msg.usage.input_tokens} in, ${msg.usage.output_tokens} out)\n`;
+          const tokens = tokenExtractor.extract(msg);
+          const display = tokenExtractor.format(tokens, { showDetails: true });
+          markdown += `- **${display}**\n`;
         }
       }
     }
@@ -556,7 +556,7 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
                     <div>
                       <h1 className="text-xl font-bold">执行: {agent.name}</h1>
                       <p className="text-sm text-muted-foreground">
-                        {model === 'opus' ? 'Claude 4 Opus' : 'Claude 4 Sonnet'}
+                        {model === 'opus' ? 'Claude 4.1 Opus' : 'Claude 4 Sonnet'}
                       </p>
                     </div>
                   </div>
@@ -675,7 +675,7 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
                         <div className="w-1.5 h-1.5 rounded-full bg-primary-foreground" />
                       )}
                     </div>
-                    <span>Claude 4 Opus</span>
+                    <span>Claude 4.1 Opus</span>
                   </div>
                 </button>
               </div>

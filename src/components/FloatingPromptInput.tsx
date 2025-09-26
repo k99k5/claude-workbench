@@ -25,9 +25,9 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 
 interface FloatingPromptInputProps {
   /**
-   * Callback when prompt is sent
+   * Callback when prompt is sent - now includes thinking instruction separately
    */
-  onSend: (prompt: string, model: "sonnet" | "opus" | "sonnet1m") => void;
+  onSend: (prompt: string, model: "sonnet" | "opus" | "sonnet1m", thinkingInstruction?: string) => void;
   /**
    * Whether the input is loading
    */
@@ -72,9 +72,9 @@ export interface FloatingPromptInputRef {
 }
 
 /**
- * Thinking mode type definition
+ * Thinking mode type definition - Updated to match official Claude Code documentation
  */
-type ThinkingMode = "auto" | "think" | "think_hard" | "think_harder" | "ultrathink";
+type ThinkingMode = "auto" | "think" | "keep_thinking" | "think_more" | "think_a_lot" | "think_longer";
 
 /**
  * Thinking mode configuration
@@ -83,8 +83,8 @@ type ThinkingModeConfig = {
   id: ThinkingMode;
   name: string;
   description: string;
-  level: number; // 0-4 for visual indicator
-  phrase?: string; // The phrase to append
+  level: number; // 0-5 for visual indicator
+  phrase?: string; // The phrase to append - matches official documentation
 };
 
 const THINKING_MODES: ThinkingModeConfig[] = [
@@ -102,35 +102,43 @@ const THINKING_MODES: ThinkingModeConfig[] = [
     phrase: "think"
   },
   {
-    id: "think_hard",
-    name: "深入思考",
-    description: "更深入分析",
+    id: "keep_thinking",
+    name: "持续思考",
+    description: "持续深入思考",
     level: 2,
-    phrase: "think hard"
+    phrase: "keep thinking"
   },
   {
-    id: "think_harder",
-    name: "Think Harder",
-    description: "Extensive reasoning",
+    id: "think_more",
+    name: "更多思考",
+    description: "进行更深层次的思考",
     level: 3,
-    phrase: "think harder"
+    phrase: "think more"
   },
   {
-    id: "ultrathink",
-    name: "Ultrathink",
-    description: "Maximum computation",
+    id: "think_a_lot",
+    name: "大量思考",
+    description: "进行广泛而深入的思考",
     level: 4,
-    phrase: "ultrathink"
+    phrase: "think a lot"
+  },
+  {
+    id: "think_longer",
+    name: "长时间思考",
+    description: "进行长时间的深度分析",
+    level: 5,
+    phrase: "think longer"
   }
 ];
 
 /**
  * ThinkingModeIndicator component - Shows visual indicator bars for thinking level
+ * Updated to support 5 levels to match official Claude Code thinking intensities
  */
 const ThinkingModeIndicator: React.FC<{ level: number }> = ({ level }) => {
   return (
     <div className="flex items-center gap-0.5">
-      {[1, 2, 3, 4].map((i) => (
+      {[1, 2, 3, 4, 5].map((i) => (
         <div
           key={i}
           className={cn(
@@ -165,8 +173,8 @@ const MODELS: Model[] = [
   },
   {
     id: "opus",
-    name: "Claude 4 Opus",
-    description: "More capable, better for complex tasks",
+    name: "Claude 4.1 Opus",
+    description: "Latest model with enhanced coding & reasoning capabilities",
     icon: <Sparkles className="h-4 w-4" />
   }
 ];
@@ -422,16 +430,12 @@ const FloatingPromptInputInner = (
         finalPrompt = finalPrompt + (finalPrompt.endsWith(' ') || finalPrompt === '' ? '' : ' ') + imagePathMentions;
       }
       
-      // Append thinking phrase if not auto mode
+      // Extract thinking instruction separately - don't embed in main prompt
       const thinkingMode = THINKING_MODES.find(m => m.id === selectedThinkingMode);
-      if (thinkingMode && thinkingMode.phrase) {
-        // 避免使用换行符，改用空格分隔，防止命令行参数解析问题
-        const endsWithPunctuation = /[.!?]$/.test(finalPrompt.trim());
-        const separator = endsWithPunctuation ? ' ' : '. ';
-        finalPrompt = `${finalPrompt}${separator}${thinkingMode.phrase}.`;
-      }
-      
-      onSend(finalPrompt, selectedModel);
+      const thinkingInstruction = thinkingMode?.phrase || undefined;
+
+      // Send prompt and thinking instruction separately
+      onSend(finalPrompt, selectedModel, thinkingInstruction);
       setPrompt("");
       setImageAttachments([]);
       setEmbeddedImages([]);

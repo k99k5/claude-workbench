@@ -130,14 +130,8 @@ pub fn build_execution_args(
     let escaped_prompt = escape_prompt_fn(prompt);
     
     // 添加基础参数
-    if prompt.trim().starts_with('/') {
-        // 斜杠命令需要 --prompt 标志
-        args.push("--prompt".to_string());
-        args.push(escaped_prompt);
-    } else {
-        // 常规提示作为位置参数
-        args.push(escaped_prompt);
-    }
+    // 所有提示（包括斜杠命令）都作为位置参数传递
+    args.push(escaped_prompt);
     
     // 添加模型参数
     args.push("--model".to_string());

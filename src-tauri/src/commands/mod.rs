@@ -8,3 +8,5 @@ pub mod clipboard;
 pub mod provider;
 pub mod permission_config;
 pub mod translator;
+pub mod context_manager;
+pub mod context_commands;

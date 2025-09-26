@@ -258,6 +258,12 @@ export interface UsageOverview {
   top_project?: string;
 }
 
+export interface SessionCacheTokens {
+  session_id: string;
+  total_cache_creation_tokens: number;
+  total_cache_read_tokens: number;
+}
+
 /**
  * Represents a checkpoint in the session timeline
  */
@@ -499,6 +505,72 @@ export interface TranslationCacheStats {
   total_entries: number;
   expired_entries: number;
   active_entries: number;
+}
+
+/**
+ * Auto-compact configuration
+ */
+export interface AutoCompactConfig {
+  /** Enable automatic compaction */
+  enabled: boolean;
+  /** Maximum context tokens before triggering compaction */
+  max_context_tokens: number;
+  /** Threshold percentage to trigger compaction (0.0-1.0) */
+  compaction_threshold: number;
+  /** Minimum time between compactions in seconds */
+  min_compaction_interval: number;
+  /** Strategy for compaction */
+  compaction_strategy: CompactionStrategy;
+  /** Whether to preserve recent messages */
+  preserve_recent_messages: boolean;
+  /** Number of recent messages to preserve */
+  preserve_message_count: number;
+  /** Custom compaction instructions */
+  custom_instructions?: string;
+}
+
+/**
+ * Compaction strategies
+ */
+export type CompactionStrategy =
+  | 'Smart'
+  | 'Aggressive'
+  | 'Conservative'
+  | { Custom: string };
+
+/**
+ * Session context information
+ */
+export interface SessionContext {
+  session_id: string;
+  project_path: string;
+  current_tokens: number;
+  message_count: number;
+  last_compaction?: string; // ISO timestamp
+  compaction_count: number;
+  model: string;
+  status: SessionStatus;
+}
+
+/**
+ * Session status
+ */
+export type SessionStatus =
+  | 'Active'
+  | 'Idle'
+  | 'Compacting'
+  | { CompactionFailed: string };
+
+/**
+ * Auto-compact status information
+ */
+export interface AutoCompactStatus {
+  enabled: boolean;
+  is_monitoring: boolean;
+  sessions_count: number;
+  total_compactions: number;
+  max_context_tokens: number;
+  compaction_threshold: number;
 }
 
 /**
@@ -1268,6 +1340,20 @@ export const api = {
       return await invoke<UsageEntry[]>("get_usage_details", { limit });
     } catch (error) {
       console.error("Failed to get usage details:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Gets cache tokens for a specific session
+   * @param sessionId - The session ID to get cache tokens for
+   * @returns Promise resolving to session cache tokens
+   */
+  async getSessionCacheTokens(sessionId: string): Promise<SessionCacheTokens> {
+    try {
+      return await invoke<SessionCacheTokens>("get_session_cache_tokens", { sessionId });
+    } catch (error) {
+      console.error("Failed to get session cache tokens:", error);
       throw error;
     }
   },
@@ -2352,6 +2438,174 @@ export const api = {
       return await invoke<string>("init_translation_service_command", { config });
     } catch (error) {
       console.error("Failed to initialize translation service:", error);
+      throw error;
+    }
+  },
+
+  // Auto-Compact Context Management API methods
+
+  /**
+   * Initializes the auto-compact manager
+   * @returns Promise resolving when manager is initialized
+   */
+  async initAutoCompactManager(): Promise<void> {
+    try {
+      return await invoke<void>("init_auto_compact_manager");
+    } catch (error) {
+      console.error("Failed to initialize auto-compact manager:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Registers a Claude session for auto-compact monitoring
+   * @param sessionId - The session ID to register
+   * @param projectPath - The project path
+   * @param model - The model being used
+   * @returns Promise resolving when session is registered
+   */
+  async registerAutoCompactSession(sessionId: string, projectPath: string, model: string): Promise<void> {
+    try {
+      return await invoke<void>("register_auto_compact_session", { sessionId, projectPath, model });
+    } catch (error) {
+      console.error("Failed to register auto-compact session:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Updates session token count and checks for auto-compact trigger
+   * @param sessionId - The session ID
+   * @param tokenCount - Current token count
+   * @returns Promise resolving to whether compaction was triggered
+   */
+  async updateSessionContext(sessionId: string, tokenCount: number): Promise<boolean> {
+    try {
+      return await invoke<boolean>("update_session_context", { sessionId, tokenCount });
+    } catch (error) {
+      console.error("Failed to update session context:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Manually triggers compaction for a session
+   * @param sessionId - The session ID
+   * @param customInstructions - Optional custom compaction instructions
+   * @returns Promise resolving when compaction is complete
+   */
+  async triggerManualCompaction(sessionId: string, customInstructions?: string): Promise<void> {
+    try {
+      return await invoke<void>("trigger_manual_compaction", { sessionId, customInstructions });
+    } catch (error) {
+      console.error("Failed to trigger manual compaction:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Gets the current auto-compact configuration
+   * @returns Promise resolving to the configuration
+   */
+  async getAutoCompactConfig(): Promise<AutoCompactConfig> {
+    try {
+      return await invoke<AutoCompactConfig>("get_auto_compact_config");
+    } catch (error) {
+      console.error("Failed to get auto-compact config:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Updates the auto-compact configuration
+   * @param config - The new configuration
+   * @returns Promise resolving when configuration is updated
+   */
+  async updateAutoCompactConfig(config: AutoCompactConfig): Promise<void> {
+    try {
+      return await invoke<void>("update_auto_compact_config", { config });
+    } catch (error) {
+      console.error("Failed to update auto-compact config:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Gets session context statistics
+   * @param sessionId - The session ID
+   * @returns Promise resolving to session context information
+   */
+  async getSessionContextStats(sessionId: string): Promise<SessionContext | null> {
+    try {
+      return await invoke<SessionContext | null>("get_session_context_stats", { sessionId });
+    } catch (error) {
+      console.error("Failed to get session context stats:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Gets all monitored sessions
+   * @returns Promise resolving to array of session contexts
+   */
+  async getAllMonitoredSessions(): Promise<SessionContext[]> {
+    try {
+      return await invoke<SessionContext[]>("get_all_monitored_sessions");
+    } catch (error) {
+      console.error("Failed to get monitored sessions:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Unregisters session from auto-compact monitoring
+   * @param sessionId - The session ID to unregister
+   * @returns Promise resolving when session is unregistered
+   */
+  async unregisterAutoCompactSession(sessionId: string): Promise<void> {
+    try {
+      return await invoke<void>("unregister_auto_compact_session", { sessionId });
+    } catch (error) {
+      console.error("Failed to unregister auto-compact session:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Stops auto-compact monitoring
+   * @returns Promise resolving when monitoring is stopped
+   */
+  async stopAutoCompactMonitoring(): Promise<void> {
+    try {
+      return await invoke<void>("stop_auto_compact_monitoring");
+    } catch (error) {
+      console.error("Failed to stop auto-compact monitoring:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Starts auto-compact monitoring
+   * @returns Promise resolving when monitoring is started
+   */
+  async startAutoCompactMonitoring(): Promise<void> {
+    try {
+      return await invoke<void>("start_auto_compact_monitoring");
+    } catch (error) {
+      console.error("Failed to start auto-compact monitoring:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Gets auto-compact status and statistics
+   * @returns Promise resolving to status information
+   */
+  async getAutoCompactStatus(): Promise<AutoCompactStatus> {
+    try {
+      return await invoke<AutoCompactStatus>("get_auto_compact_status");
+    } catch (error) {
+      console.error("Failed to get auto-compact status:", error);
       throw error;
     }
   },

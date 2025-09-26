@@ -14,6 +14,7 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { getClaudeSyntaxTheme } from "@/lib/claudeSyntaxTheme";
 import { useTheme } from "@/contexts/ThemeContext";
 import { api } from "@/lib/api";
+import { tokenExtractor } from "@/lib/tokenExtractor";
 import type { ClaudeStreamMessage } from "./AgentExecution";
 
 // Utility function to format timestamp to hh:mm:ss format
@@ -350,7 +351,15 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
                 
                 {msg.usage && (
                   <div className="text-sm text-foreground/70 mt-2">
-                    Tokens: {msg.usage.input_tokens} in, {msg.usage.output_tokens} out
+                    {(() => {
+                      const extractedTokens = tokenExtractor.extract({
+                        type: 'assistant',
+                        message: { usage: msg.usage }
+                      });
+                      return `Tokens: ${extractedTokens.input_tokens} 提示, ${extractedTokens.output_tokens} 补全` +
+                        (extractedTokens.cache_creation_tokens > 0 ? `, ${extractedTokens.cache_creation_tokens} 缓存创建` : '') +
+                        (extractedTokens.cache_read_tokens > 0 ? `, ${extractedTokens.cache_read_tokens} 缓存` : '');
+                    })()}
                   </div>
                 )}
               </div>
@@ -763,8 +772,15 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
                   )}
                   {message.usage && (
                     <div>
-                      Total tokens: {message.usage.input_tokens + message.usage.output_tokens} 
-                      ({message.usage.input_tokens} in, {message.usage.output_tokens} out)
+                      {(() => {
+                        const extractedTokens = tokenExtractor.extract({
+                          type: 'result',
+                          usage: message.usage
+                        });
+                        const totalTokens = extractedTokens.input_tokens + extractedTokens.output_tokens +
+                                          extractedTokens.cache_creation_tokens + extractedTokens.cache_read_tokens;
+                        return `Total tokens: ${totalTokens} (${extractedTokens.input_tokens} in, ${extractedTokens.output_tokens} out)`;
+                      })()}
                     </div>
                   )}
                 </div>

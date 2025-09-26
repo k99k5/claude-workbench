@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::env;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::command;
+use tauri::{command, AppHandle, Manager};
 
 #[derive(Debug, Clone)]
 struct UsageCacheEntry {
@@ -764,7 +764,7 @@ pub fn get_usage_stats(days: Option<u32>) -> Result<UsageStats, String> {
         
         // 限制缓存大小
         if cache.len() > 20 {
-            let mut keys_to_remove: Vec<String> = cache.keys().take(5).cloned().collect();
+            let keys_to_remove: Vec<String> = cache.keys().take(5).cloned().collect();
             for key in keys_to_remove {
                 cache.remove(&key);
             }
@@ -1890,4 +1890,84 @@ pub fn get_burn_rate_analysis() -> Result<BurnRateInfo, String> {
         session_utilization,
         recommendations,
     })
+}
+
+/// New command to get cache tokens for a specific session
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SessionCacheTokens {
+    pub session_id: String,
+    pub total_cache_creation_tokens: u64,
+    pub total_cache_read_tokens: u64,
+}
+
+#[command]
+pub fn get_session_cache_tokens(session_id: String) -> Result<SessionCacheTokens, String> {
+    let claude_path = dirs::home_dir()
+        .ok_or("Failed to get home directory")?
+        .join(".claude");
+
+    let all_entries = get_all_usage_entries(&claude_path);
+
+    // Filter entries for this specific session
+    let session_entries: Vec<_> = all_entries
+        .into_iter()
+        .filter(|entry| entry.session_id == session_id)
+        .collect();
+
+    // Sum up cache tokens for this session
+    let mut total_cache_creation_tokens = 0u64;
+    let mut total_cache_read_tokens = 0u64;
+
+    for entry in session_entries {
+        total_cache_creation_tokens += entry.cache_creation_tokens;
+        total_cache_read_tokens += entry.cache_read_tokens;
+    }
+
+    Ok(SessionCacheTokens {
+        session_id,
+        total_cache_creation_tokens,
+        total_cache_read_tokens,
+    })
+}
+
+/// Get real-time usage data from database
+#[command]
+pub async fn get_realtime_usage_stats(app: AppHandle) -> Result<Vec<UsageEntry>, String> {
+    use crate::commands::agents::AgentDb;
+
+    // Get the database from app state
+    let agent_db = app.state::<AgentDb>();
+    let conn = agent_db.0.lock().map_err(|e| e.to_string())?;
+
+    // Query recent usage entries from database
+    let mut stmt = conn
+        .prepare(
+            "SELECT session_id, timestamp, model, input_tokens, output_tokens,
+                    cache_creation_tokens, cache_read_tokens, cost, project_path, created_at
+             FROM usage_entries
+             ORDER BY created_at DESC
+             LIMIT 1000"
+        )
+        .map_err(|e| e.to_string())?;
+
+    let usage_entries = stmt
+        .query_map([], |row| {
+            Ok(UsageEntry {
+                session_id: row.get(0)?,
+                timestamp: row.get(1)?,
+                model: row.get(2)?,
+                input_tokens: row.get::<_, i64>(3)? as u64,
+                output_tokens: row.get::<_, i64>(4)? as u64,
+                cache_creation_tokens: row.get::<_, i64>(5)? as u64,
+                cache_read_tokens: row.get::<_, i64>(6)? as u64,
+                cost: row.get(7)?,
+                project_path: row.get(8)?,
+                api_base_url: "https://api.anthropic.com".to_string(), // Default API base URL
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    Ok(usage_entries)
 }

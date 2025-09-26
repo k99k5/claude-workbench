@@ -248,7 +248,7 @@
     "agentIcon": "智能体图标",
     "model": "模型",
     "claude4Sonnet": "Claude 4 Sonnet",
-    "claude4Opus": "Claude 4 Opus",
+    "claude4Opus": "Claude 4.1 Opus",
     "fasterEfficient": "更快，适用于大多数任务",
     "moreCapable": "更强大，适用于复杂任务",
     "defaultTaskOptional": "默认任务（可选）",

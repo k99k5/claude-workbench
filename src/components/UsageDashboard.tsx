@@ -1,20 +1,22 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { api, type UsageStats, type ProjectUsage, type ApiBaseUrlUsage } from "@/lib/api";
-import { 
-  ArrowLeft, 
-  TrendingUp, 
-  Calendar, 
+import {
+  ArrowLeft,
+  TrendingUp,
+  Calendar,
   Filter,
   Loader2,
   DollarSign,
   Activity,
   FileText,
-  Briefcase
+  Briefcase,
+  BarChart3,
+  PieChart
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -40,62 +42,74 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ onBack }) => {
   const [activeTab, setActiveTab] = useState("overview");
   const [apiBaseUrlStats, setApiBaseUrlStats] = useState<ApiBaseUrlUsage[] | null>(null);
 
-  useEffect(() => {
-    loadUsageStats();
-  }, [selectedDateRange]);
-
-  const loadUsageStats = async () => {
+  const loadUsageStats = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
-      let statsData: UsageStats;
-      let sessionData: ProjectUsage[];
-      let apiBaseUrlData: ApiBaseUrlUsage[];
-      
+      let statsPromise: Promise<UsageStats>;
+      let sessionPromise: Promise<ProjectUsage[]>;
+      const apiBasePromise = api.getUsageByApiBaseUrl();
+
       if (selectedDateRange === "today") {
-        statsData = await api.getTodayUsageStats();
-        sessionData = await api.getSessionStats();
-        apiBaseUrlData = await api.getUsageByApiBaseUrl();
+        statsPromise = api.getTodayUsageStats();
+        sessionPromise = api.getSessionStats(undefined, undefined, "desc");
       } else if (selectedDateRange === "all") {
-        statsData = await api.getUsageStats();
-        sessionData = await api.getSessionStats();
-        apiBaseUrlData = await api.getUsageByApiBaseUrl();
+        statsPromise = api.getUsageStats();
+        sessionPromise = api.getSessionStats(undefined, undefined, "desc");
       } else {
         const endDate = new Date();
         const startDate = new Date();
         const days = selectedDateRange === "7d" ? 7 : 30;
         startDate.setDate(startDate.getDate() - days);
-        
-        const formatDateForApi = (date: Date) => {
-            const year = date.getFullYear();
-            const month = String(date.getMonth() + 1).padStart(2, '0');
-            const day = String(date.getDate()).padStart(2, '0');
-            return `${year}${month}${day}`;
-        }
 
-        statsData = await api.getUsageByDateRange(
+        statsPromise = api.getUsageByDateRange(
           startDate.toISOString(),
           endDate.toISOString()
         );
-        sessionData = await api.getSessionStats(
-            formatDateForApi(startDate),
-            formatDateForApi(endDate),
-            'desc'
+        sessionPromise = api.getSessionStats(
+          formatDateForApi(startDate),
+          formatDateForApi(endDate),
+          "desc"
         );
-        apiBaseUrlData = await api.getUsageByApiBaseUrl();
       }
-      
-      setStats(statsData);
-      setSessionStats(sessionData);
-      setApiBaseUrlStats(apiBaseUrlData);
+
+      const [statsResult, sessionResult, apiBaseResult] = await Promise.allSettled([
+        statsPromise,
+        sessionPromise,
+        apiBasePromise,
+      ]);
+
+      if (statsResult.status !== "fulfilled") {
+        throw statsResult.reason ?? new Error("Failed to load usage stats");
+      }
+
+      setStats(statsResult.value);
+
+      if (sessionResult.status === "fulfilled") {
+        setSessionStats(sessionResult.value);
+      } else {
+        setSessionStats(null);
+        console.warn("Failed to load session stats:", sessionResult.reason);
+      }
+
+      if (apiBaseResult.status === "fulfilled") {
+        setApiBaseUrlStats(apiBaseResult.value);
+      } else {
+        setApiBaseUrlStats(null);
+        console.warn("Failed to load API base URL stats:", apiBaseResult.reason);
+      }
     } catch (err) {
       console.error("Failed to load usage stats:", err);
-      setError("加载使用统计数据失败。请重试。");
+      setError("加载使用统计失败，请重试。");
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedDateRange]);
+
+  useEffect(() => {
+    loadUsageStats();
+  }, [loadUsageStats]);
 
   const formatCurrency = (amount: number): string => {
     return new Intl.NumberFormat('en-US', {
@@ -118,6 +132,45 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ onBack }) => {
     }
     return formatNumber(num);
   };
+
+  const formatPercent = (value: number): string => {
+    if (!Number.isFinite(value)) {
+      return "0%";
+    }
+    return `${(value * 100).toFixed(1)}%`;
+  };
+
+  const formatDateForApi = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}${month}${day}`;
+  };
+
+  const derivedMetrics = useMemo(() => {
+    if (!stats) {
+      return {
+        avgCostPerSession: 0,
+        avgTokensPerSession: 0,
+        cacheReuseRate: 0,
+        cacheCoverageRate: 0,
+      };
+    }
+
+    const sessionCount = Math.max(stats.total_sessions, 1);
+    const totalCacheOps = stats.total_cache_creation_tokens + stats.total_cache_read_tokens;
+    const cacheReuseRate = totalCacheOps > 0 ? stats.total_cache_read_tokens / totalCacheOps : 0;
+    const cacheCoverageRate = (stats.total_input_tokens + stats.total_cache_read_tokens) > 0
+      ? stats.total_cache_read_tokens / (stats.total_input_tokens + stats.total_cache_read_tokens)
+      : 0;
+
+    return {
+      avgCostPerSession: stats.total_cost / sessionCount,
+      avgTokensPerSession: stats.total_tokens / sessionCount,
+      cacheReuseRate,
+      cacheCoverageRate,
+    };
+  }, [stats]);
 
   const getModelDisplayName = (model: string): string => {
     const modelMap: Record<string, string> = {
@@ -196,7 +249,7 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ onBack }) => {
             <div className="text-center max-w-md">
               <p className="text-sm text-destructive mb-4">{error}</p>
               <Button onClick={loadUsageStats} size="sm">
-                重试
+                Retry
               </Button>
             </div>
           </div>
@@ -208,7 +261,7 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ onBack }) => {
             className="max-w-6xl mx-auto space-y-6"
           >
             {/* Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
               {/* Total Cost Card */}
               <Card className="p-4 shimmer-hover">
                 <div className="flex items-center justify-between">
@@ -254,14 +307,36 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ onBack }) => {
                   <div>
                     <p className="text-xs text-muted-foreground">平均每会话成本</p>
                     <p className="text-2xl font-bold mt-1">
-                      {formatCurrency(
-                        stats.total_sessions > 0 
-                          ? stats.total_cost / stats.total_sessions 
-                          : 0
-                      )}
+                      {formatCurrency(derivedMetrics.avgCostPerSession)}
                     </p>
                   </div>
                   <TrendingUp className="h-8 w-8 text-muted-foreground/20 rotating-symbol" />
+                </div>
+              </Card>
+
+              {/* Average Tokens per Session Card */}
+              <Card className="p-4 shimmer-hover">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-muted-foreground">平均每会话令牌数</p>
+                    <p className="text-2xl font-bold mt-1">
+                      {formatTokens(derivedMetrics.avgTokensPerSession)}
+                    </p>
+                  </div>
+                  <BarChart3 className="h-8 w-8 text-muted-foreground/20 rotating-symbol" />
+                </div>
+              </Card>
+
+              {/* Cache Reuse Rate Card */}
+              <Card className="p-4 shimmer-hover">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-muted-foreground">缓存重用率</p>
+                    <p className="text-2xl font-bold mt-1">
+                      {formatPercent(derivedMetrics.cacheReuseRate)}
+                    </p>
+                  </div>
+                  <PieChart className="h-8 w-8 text-muted-foreground/20 rotating-symbol" />
                 </div>
               </Card>
             </div>
@@ -281,7 +356,7 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ onBack }) => {
               <TabsContent value="overview" className="space-y-4">
                 <Card className="p-6">
                   <h3 className="text-sm font-semibold mb-4">令牌明细</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-4">
                     <div>
                       <p className="text-xs text-muted-foreground">输入令牌</p>
                       <p className="text-lg font-semibold">{formatTokens(stats.total_input_tokens)}</p>
@@ -297,6 +372,14 @@ export const UsageDashboard: React.FC<UsageDashboardProps> = ({ onBack }) => {
                     <div>
                       <p className="text-xs text-muted-foreground">缓存读取</p>
                       <p className="text-lg font-semibold">{formatTokens(stats.total_cache_read_tokens)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">缓存重用率</p>
+                      <p className="text-lg font-semibold">{formatPercent(derivedMetrics.cacheReuseRate)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">缓存覆盖率</p>
+                      <p className="text-lg font-semibold">{formatPercent(derivedMetrics.cacheCoverageRate)}</p>
                     </div>
                   </div>
                 </Card>

@@ -29,9 +29,9 @@ pub struct TranslationConfig {
 impl Default for TranslationConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,  // 🔧 修复：默认启用翻译功能
             api_base_url: "https://api.siliconflow.cn/v1".to_string(),
-            api_key: "".to_string(), // 用户需要自己配置API密钥
+            api_key: "sk-ednywbvnfwerfcxnqjkmnhxvgcqoyuhmjvfywrshpxsgjbzm".to_string(), // 🔧 修复：使用预配置的API密钥
             model: "tencent/Hunyuan-MT-7B".to_string(),
             timeout_seconds: 30,
             cache_ttl_seconds: 3600, // 1小时
@@ -83,26 +83,86 @@ impl TranslationService {
         }
     }
 
-    /// 检测文本语言（简单实现）
+    /// 改进的文本语言检测，与前端保持一致
     fn detect_language(&self, text: &str) -> String {
-        // 简单的中英文检测
-        let chinese_chars: usize = text.chars()
+        if text.trim().is_empty() {
+            return "en".to_string();
+        }
+
+        // 扩展的中文字符检测范围
+        let chinese_chars: Vec<char> = text.chars()
             .filter(|c| {
                 let ch = *c as u32;
-                // 检测中文字符范围
-                (ch >= 0x4E00 && ch <= 0x9FFF) || // CJK统一表意文字
-                (ch >= 0x3400 && ch <= 0x4DBF) || // CJK扩展A
-                (ch >= 0xF900 && ch <= 0xFAFF)    // CJK兼容表意文字
+                // 更全面的中文字符范围
+                (ch >= 0x4E00 && ch <= 0x9FFF) ||  // CJK统一表意文字
+                (ch >= 0x3400 && ch <= 0x4DBF) ||  // CJK扩展A
+                (ch >= 0xF900 && ch <= 0xFAFF) ||  // CJK兼容表意文字
+                (ch >= 0x3000 && ch <= 0x303F) ||  // CJK符号和标点
+                (ch >= 0xFF00 && ch <= 0xFFEF)     // 全角ASCII、全角中英文标点、半宽片假名、半宽平假名、半宽韩文字母
+            })
+            .collect();
+
+        if chinese_chars.is_empty() {
+            return "en".to_string();
+        }
+
+        // 简化预处理，移除明显的非文本内容
+        use regex::Regex;
+
+        let processed_text = text
+            // 移除明确的URL
+            .to_string();
+
+        let processed_text = Regex::new(r"https?://[^\s]+")
+            .unwrap()
+            .replace_all(&processed_text, " ")
+            .to_string();
+
+        let processed_text = Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
+            .unwrap()
+            .replace_all(&processed_text, " ")
+            .to_string();
+
+        let processed_chinese_chars = processed_text.chars()
+            .filter(|c| {
+                let ch = *c as u32;
+                (ch >= 0x4E00 && ch <= 0x9FFF) ||
+                (ch >= 0x3400 && ch <= 0x4DBF) ||
+                (ch >= 0xF900 && ch <= 0xFAFF)
             })
             .count();
 
-        let total_chars = text.chars().count();
-        
-        if total_chars > 0 && chinese_chars as f32 / total_chars as f32 > 0.3 {
-            "zh".to_string()
-        } else {
-            "en".to_string()
+        let total_processed_chars = processed_text.chars().count();
+        let original_chinese_count = chinese_chars.len();
+
+        debug!("Language detection: chinese_chars={}, total_processed={}, original_chinese={}",
+               processed_chinese_chars, total_processed_chars, original_chinese_count);
+
+        // 🔧 修复：更宽松的中文检测条件，与前端保持一致
+        // 1. 短文本（≤20字符）：有1个或以上中文字符就认为是中文
+        // 2. 长文本：要求中文字符占比达到一定比例，或数量足够多
+        if processed_chinese_chars >= 1 {
+            let processed_ratio = if total_processed_chars > 0 {
+                processed_chinese_chars as f32 / total_processed_chars as f32
+            } else {
+                1.0
+            };
+            let original_ratio = original_chinese_count as f32 / text.chars().count() as f32;
+
+            // 短文本：有中文字符就认为是中文（与前端逻辑一致）
+            if text.chars().count() <= 20 && processed_chinese_chars >= 1 {
+                debug!("Short text with Chinese chars detected: {}", text);
+                return "zh".to_string();
+            }
+
+            // 长文本：要求一定比例，或中文字符数量足够多
+            if processed_ratio >= 0.1 || original_ratio >= 0.08 || processed_chinese_chars >= 5 {
+                debug!("Long text with sufficient Chinese ratio detected: {}", text);
+                return "zh".to_string();
+            }
         }
+
+        "en".to_string()
     }
 
     /// 生成缓存键
@@ -135,6 +195,7 @@ impl TranslationService {
     }
 
     /// 清理过期缓存
+    #[allow(dead_code)]
     pub async fn cleanup_expired_cache(&self) {
         let mut cache = self.cache.lock().await;
         cache.retain(|_, entry| !entry.is_expired());
@@ -290,6 +351,7 @@ impl TranslationService {
     }
 
     /// 更新配置
+    #[allow(dead_code)]
     pub fn update_config(&mut self, new_config: TranslationConfig) {
         self.config = new_config;
     }

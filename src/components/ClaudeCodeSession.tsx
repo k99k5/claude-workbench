@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover } from "@/components/ui/popover";
 import { api, type Session } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { cn, normalizeUsageData } from "@/lib/utils";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { StreamMessage } from "./StreamMessage";
@@ -32,8 +32,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { SplitPane } from "@/components/ui/split-pane";
 import { WebviewPreview } from "./WebviewPreview";
 import type { ClaudeStreamMessage } from "./AgentExecution";
-import { translationMiddleware, type TranslationResult } from '@/lib/translationMiddleware';
+import { translationMiddleware, isSlashCommand, type TranslationResult } from '@/lib/translationMiddleware';
+import { progressiveTranslationManager, TranslationPriority, type TranslationState } from '@/lib/progressiveTranslation';
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { tokenExtractor } from '@/lib/tokenExtractor';
 
 interface ClaudeCodeSessionProps {
   /**
@@ -96,8 +98,22 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   
   // Queued prompts state
   const [queuedPrompts, setQueuedPrompts] = useState<Array<{ id: string; prompt: string; model: "sonnet" | "opus" | "sonnet1m" }>>([]);
-  
-  
+
+  // Progressive translation state
+  const [translationStates, setTranslationStates] = useState<TranslationState>({});
+  const [translationEnabled, setTranslationEnabled] = useState<boolean>(false);
+
+  // Debug logging for translation states - TODO: Use in UI components
+  React.useEffect(() => {
+    if (Object.keys(translationStates).length > 0) {
+      console.debug('[ClaudeCodeSession] Translation states updated:', Object.keys(translationStates).length, 'messages');
+    }
+  }, [translationStates]);
+
+  React.useEffect(() => {
+    console.debug('[ClaudeCodeSession] Translation enabled state:', translationEnabled);
+  }, [translationEnabled]);
+
   // New state for preview feature
   const [showPreview, setShowPreview] = useState(false);
   const [previewUrl, setPreviewUrl] = useState("");
@@ -125,7 +141,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const queuedPromptsRef = useRef<Array<{ id: string; prompt: string; model: "sonnet" | "opus" | "sonnet1m" }>>([]);
   const isMountedRef = useRef(true);
   const isListeningRef = useRef(false);
-  const handleSendPromptRef = useRef<((prompt: string, model: "sonnet" | "opus" | "sonnet1m") => Promise<void>) | null>(null);
+  const handleSendPromptRef = useRef<((prompt: string, model: "sonnet" | "opus" | "sonnet1m", thinkingInstruction?: string) => Promise<void>) | null>(null);
 
   // Keep ref in sync with state
   useEffect(() => {
@@ -339,44 +355,740 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     }
   }, [isLoading, displayableMessages.length, shouldAutoScroll, userScrolled]);
 
-  // Calculate total tokens from messages and update context manager
+  // Calculate total tokens from messages using enhanced token counter
   useEffect(() => {
-    const tokens = messages.reduce((total, msg) => {
-      if (msg.message?.usage) {
-        return total + msg.message.usage.input_tokens + msg.message.usage.output_tokens;
+    try {
+      if (messages.length > 0) {
+        const totalTokens = tokenExtractor.sessionTotal(messages);
+        setTotalTokens(totalTokens.total_tokens);
+        console.log('[ClaudeCodeSession] 📊 Enhanced token calculation:', {
+          messages: messages.length,
+          totalTokens: totalTokens.total_tokens,
+          efficiency: totalTokens.cache_read_tokens > 0 ? `${((totalTokens.cache_read_tokens / totalTokens.total_tokens) * 100).toFixed(1)}% cached` : 'no cache'
+        });
+      } else {
+        setTotalTokens(0);
       }
-      if (msg.usage) {
-        return total + msg.usage.input_tokens + msg.usage.output_tokens;
-      }
-      return total;
-    }, 0);
-    setTotalTokens(tokens);
+    } catch (err) {
+      console.error('[ClaudeCodeSession] Error in enhanced token calculation:', err);
+      setTotalTokens(0);
+    }
   }, [messages]);
 
   const loadSessionHistory = async () => {
     if (!session) return;
-    
+
     try {
       setIsLoading(true);
       setError(null);
-      
+
       const history = await api.loadSessionHistory(session.id, session.project_id);
-      
+
       // Convert history to messages format
       const loadedMessages: ClaudeStreamMessage[] = history.map(entry => ({
         ...entry,
         type: entry.type || "assistant"
       }));
-      
-      setMessages(loadedMessages);
+
+      // ✨ NEW: Normalize usage data for historical messages
+      const processedMessages = loadedMessages.map(msg => {
+        if (msg.message?.usage) {
+          msg.message.usage = normalizeUsageData(msg.message.usage);
+        }
+        return msg;
+      });
+
+      // ✨ NEW: Immediate display - no more blocking on translation
+      console.log('[ClaudeCodeSession] 🚀 Displaying messages immediately:', loadedMessages.length);
+      setMessages(processedMessages);
+
+      // ✨ NEW: Start progressive translation in background
+      initializeProgressiveTranslation(processedMessages);
       setRawJsonlOutput(history.map(h => JSON.stringify(h)));
-      
+
       // After loading history, we're continuing a conversation
     } catch (err) {
       console.error("Failed to load session history:", err);
-      setError("Failed to load session history");
+      setError("加载会话历史记录失败");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  /**
+   * Translate historical messages using the same logic as real-time messages
+   */
+  /**
+   * Process a message with translation - shared logic for both real-time and reconnect scenarios
+   */
+  const processMessageWithTranslation = async (message: ClaudeStreamMessage, payload: string, currentTranslationResult?: TranslationResult) => {
+    try {
+      // Don't process if component unmounted
+      if (!isMountedRef.current) return;
+
+      // Add received timestamp for non-user messages
+      if (message.type !== "user") {
+        message.receivedAt = new Date().toISOString();
+      }
+
+      // 🌐 Translation: Process Claude response
+      let processedMessage = { ...message };
+
+      try {
+        const isEnabled = await translationMiddleware.isEnabled();
+
+        // 使用传递的翻译结果或状态中的结果
+        const effectiveTranslationResult = currentTranslationResult || lastTranslationResult;
+
+        console.log('[ClaudeCodeSession] Translation debug:', {
+          isEnabled,
+          hasCurrentResult: !!currentTranslationResult,
+          hasStateResult: !!lastTranslationResult,
+          hasEffectiveResult: !!effectiveTranslationResult,
+          messageType: message.type,
+          messageContent: message.content ? 'has content' : 'no content'
+        });
+
+        // 🔧 EXPANDED MESSAGE TYPE SUPPORT: Cover all possible Claude Code response types
+        const isClaudeResponse = message.type === "assistant" ||
+                               message.type === "result" ||
+                               (message.type === "system" && message.subtype !== "init") ||
+                               // Handle any message with actual content regardless of type
+                               !!(message.content || message.message?.content || (message as any).text || (message as any).result || (message as any).summary || (message as any).error);
+
+        if (isEnabled && isClaudeResponse) {
+          console.log('[ClaudeCodeSession] Found Claude response message, checking translation conditions...');
+
+          // 🌟 Enhanced Translation Strategy: Always translate English content when translation is enabled
+          // This ensures comprehensive coverage of all Claude outputs, tool results, and system messages
+
+          // 🌟 COMPREHENSIVE CONTENT EXTRACTION STRATEGY
+          // This ensures we capture ALL possible text content from Claude Code SDK responses
+          let textContent = '';
+          let contentSources: string[] = [];
+
+          // Method 1: Direct content string
+          if (typeof message.content === 'string' && message.content.trim()) {
+            textContent = message.content;
+            contentSources.push('direct_content');
+          }
+          // Method 2: Array content (Claude API format)
+          else if (Array.isArray(message.content)) {
+            const arrayContent = message.content
+              .filter((item: any) => item && (item.type === 'text' || typeof item === 'string'))
+              .map((item: any) => {
+                if (typeof item === 'string') return item;
+                if (item.type === 'text') return item.text || '';
+                return item.content || item.text || '';
+              })
+              .join('\n');
+            if (arrayContent.trim()) {
+              textContent = arrayContent;
+              contentSources.push('array_content');
+            }
+          }
+          // Method 3: Object with text property
+          else if (message.content?.text && typeof message.content.text === 'string') {
+            textContent = message.content.text;
+            contentSources.push('content_text');
+          }
+          // Method 4: Nested in message.content (Claude Code SDK primary format)
+          else if (message.message?.content) {
+            const messageContent: any = message.message.content;
+            if (typeof messageContent === 'string' && messageContent.trim()) {
+              textContent = messageContent;
+              contentSources.push('message_content_string');
+            } else if (Array.isArray(messageContent)) {
+              const nestedContent = messageContent
+                .filter((item: any) => item && (item.type === 'text' || typeof item === 'string'))
+                .map((item: any) => {
+                  if (typeof item === 'string') return item;
+                  if (item.type === 'text') return item.text || '';
+                  return item.content || item.text || '';
+                })
+                .join('\n');
+              if (nestedContent.trim()) {
+                textContent = nestedContent;
+                contentSources.push('message_content_array');
+              }
+            }
+          }
+
+          // Method 5: Direct text property
+          if (!textContent && (message as any).text && typeof (message as any).text === 'string') {
+            textContent = (message as any).text;
+            contentSources.push('direct_text');
+          }
+
+          // Method 6: Result field (for result-type messages)
+          if (!textContent && (message as any).result && typeof (message as any).result === 'string') {
+            textContent = (message as any).result;
+            contentSources.push('result_field');
+          }
+
+          // Method 7: Error field (for error messages)
+          if (!textContent && (message as any).error && typeof (message as any).error === 'string') {
+            textContent = (message as any).error;
+            contentSources.push('error_field');
+          }
+
+          // Method 8: Summary field (for summary messages)
+          if (!textContent && (message as any).summary && typeof (message as any).summary === 'string') {
+            textContent = (message as any).summary;
+            contentSources.push('summary_field');
+          }
+
+          console.log('[ClaudeCodeSession] Content extraction results:', {
+            textContentLength: textContent.length,
+            contentSources,
+            messageType: message.type,
+            hasMessageContent: !!message.message?.content,
+            textPreview: textContent.substring(0, 100)
+          });
+
+          if (textContent.trim()) {
+            console.log('[ClaudeCodeSession] 🔄 Processing content for translation...', {
+              contentLength: textContent.length,
+              messageType: message.type,
+              preview: textContent.substring(0, 100) + (textContent.length > 100 ? '...' : '')
+            });
+
+            // Attempt translation - the middleware will handle language detection and decide whether to translate
+            const responseTranslation = await translationMiddleware.translateClaudeResponse(textContent);
+
+            if (responseTranslation.wasTranslated) {
+                console.log('[ClaudeCodeSession] ✅ Claude response translated:', {
+                  original: responseTranslation.originalText.substring(0, 50) + '...',
+                  translated: responseTranslation.translatedText.substring(0, 50) + '...',
+                  detectedLanguage: responseTranslation.detectedLanguage
+                });
+
+                // 🔧 COMPREHENSIVE MESSAGE UPDATE STRATEGY
+                // Update the message content based on where we found the original content
+                console.log('[ClaudeCodeSession] Updating message content with translation using sources:', contentSources);
+
+                // Update based on the content source that was found
+                const primarySource = contentSources[0];
+
+                switch (primarySource) {
+                  case 'direct_content':
+                    processedMessage.content = responseTranslation.translatedText;
+                    console.log('[ClaudeCodeSession] ✅ Updated direct content');
+                    break;
+
+                  case 'array_content':
+                    if (Array.isArray(message.content)) {
+                      processedMessage.content = message.content.map((item: any) => {
+                        if (item && (item.type === 'text' || typeof item === 'string')) {
+                          return typeof item === 'string'
+                            ? { type: 'text', text: responseTranslation.translatedText }
+                            : { ...item, text: responseTranslation.translatedText };
+                        }
+                        return item;
+                      });
+                      console.log('[ClaudeCodeSession] ✅ Updated array content');
+                    }
+                    break;
+
+                  case 'content_text':
+                    processedMessage.content = {
+                      ...message.content,
+                      text: responseTranslation.translatedText
+                    };
+                    console.log('[ClaudeCodeSession] ✅ Updated content.text');
+                    break;
+
+                  case 'message_content_string':
+                    if (message.message) {
+                      processedMessage.message = {
+                        ...message.message,
+                        content: [{ type: 'text', text: responseTranslation.translatedText }]
+                      };
+                      console.log('[ClaudeCodeSession] ✅ Updated message.content string');
+                    }
+                    break;
+
+                  case 'message_content_array':
+                    if (message.message?.content && Array.isArray(message.message.content)) {
+                      processedMessage.message = {
+                        ...message.message,
+                        content: message.message.content.map((item: any) => {
+                          if (item && (item.type === 'text' || typeof item === 'string')) {
+                            return typeof item === 'string'
+                              ? { type: 'text', text: responseTranslation.translatedText }
+                              : { ...item, text: responseTranslation.translatedText };
+                          }
+                          return item;
+                        })
+                      };
+                      console.log('[ClaudeCodeSession] ✅ Updated message.content array');
+                    }
+                    break;
+
+                  case 'direct_text':
+                    (processedMessage as any).text = responseTranslation.translatedText;
+                    console.log('[ClaudeCodeSession] ✅ Updated direct text');
+                    break;
+
+                  case 'result_field':
+                    (processedMessage as any).result = responseTranslation.translatedText;
+                    console.log('[ClaudeCodeSession] ✅ Updated result field');
+                    break;
+
+                  case 'error_field':
+                    (processedMessage as any).error = responseTranslation.translatedText;
+                    console.log('[ClaudeCodeSession] ✅ Updated error field');
+                    break;
+
+                  case 'summary_field':
+                    (processedMessage as any).summary = responseTranslation.translatedText;
+                    console.log('[ClaudeCodeSession] ✅ Updated summary field');
+                    break;
+
+                  default:
+                    // Fallback: Create new content structure
+                    processedMessage.content = [{
+                      type: 'text',
+                      text: responseTranslation.translatedText
+                    }];
+                    console.log('[ClaudeCodeSession] ⚠️ Used fallback content structure');
+                }
+
+                // Add translation metadata
+                processedMessage.translationMeta = {
+                  wasTranslated: responseTranslation.wasTranslated,
+                  detectedLanguage: responseTranslation.detectedLanguage,
+                  originalText: responseTranslation.originalText
+                };
+
+                console.log('[ClaudeCodeSession] Final processed message structure:', {
+                  type: processedMessage.type,
+                  hasContent: !!processedMessage.content,
+                  hasMessage: !!processedMessage.message,
+                  messageContentLength: processedMessage.message?.content?.length || 'none'
+                });
+            }
+          }
+        }
+      } catch (translationError) {
+        console.error('[ClaudeCodeSession] Response translation failed:', translationError);
+        // Continue with original message if translation fails
+      }
+
+      // 🔧 SAFE MESSAGE PROCESSING: Normalize usage data to handle cache token field mapping
+      try {
+        // Use the standardized usage normalization function to handle field name mapping
+        if (processedMessage.message?.usage) {
+          processedMessage.message.usage = normalizeUsageData(processedMessage.message.usage);
+          console.log('[ClaudeCodeSession] ✅ Normalized message.usage data:', processedMessage.message.usage);
+        }
+        if (processedMessage.usage) {
+          processedMessage.usage = normalizeUsageData(processedMessage.usage);
+          console.log('[ClaudeCodeSession] ✅ Normalized top-level usage data:', processedMessage.usage);
+        }
+        setMessages((prev) => [...prev, processedMessage]);
+      } catch (usageError) {
+        console.warn('[ClaudeCodeSession] Error normalizing usage data, adding message without usage:', usageError);
+        // Remove problematic usage data and add message anyway
+        const safeMessage = { ...processedMessage };
+        delete safeMessage.usage;
+        if (safeMessage.message) {
+          delete safeMessage.message.usage;
+        }
+        setMessages((prev) => [...prev, safeMessage]);
+      }
+    } catch (err) {
+      console.error('Failed to parse message:', err, payload);
+    }
+  };
+
+  /**
+   * Initialize progressive translation for historical messages
+   */
+  const initializeProgressiveTranslation = async (messages: ClaudeStreamMessage[]): Promise<void> => {
+    try {
+      // Check if translation is enabled
+      const isEnabled = await progressiveTranslationManager.isTranslationEnabled();
+      setTranslationEnabled(isEnabled);
+
+      if (!isEnabled) {
+        console.log('[ClaudeCodeSession] Progressive translation disabled');
+        return;
+      }
+
+      console.log('[ClaudeCodeSession] 🔄 Initializing progressive translation for', messages.length, 'messages');
+
+      // Initialize translation states
+      const initialStates: TranslationState = {};
+
+      // Get the most recent messages (last 10) for priority translation
+      const recentMessages = messages.slice(-10);
+
+      messages.forEach((message, index) => {
+        const messageId = `${message.timestamp || Date.now()}_${index}`;
+
+        // Extract text content for translation
+        let textContent = extractMessageContent(message);
+
+        if (textContent.trim()) {
+          initialStates[messageId] = {
+            status: 'original',
+            originalContent: textContent,
+            translatedContent: undefined
+          };
+
+          // Determine priority
+          const isRecent = recentMessages.includes(message);
+          const priority = isRecent ? TranslationPriority.HIGH : TranslationPriority.NORMAL;
+
+          // Add to translation queue
+          progressiveTranslationManager.addTask(
+            messageId,
+            textContent,
+            priority,
+            (result) => {
+              if (result && result.wasTranslated) {
+                handleTranslationComplete(messageId, message, result, index);
+              }
+            }
+          );
+        }
+      });
+
+      setTranslationStates(initialStates);
+      console.log('[ClaudeCodeSession] ✅ Progressive translation initialized:', Object.keys(initialStates).length, 'translatable messages');
+
+    } catch (error) {
+      console.error('[ClaudeCodeSession] Failed to initialize progressive translation:', error);
+    }
+  };
+
+  /**
+   * Extract translatable content from a message
+   */
+  const extractMessageContent = (message: ClaudeStreamMessage): string => {
+    // Method 1: Direct content string
+    if (typeof message.content === 'string' && message.content.trim()) {
+      return message.content;
+    }
+
+    // Method 2: Array content (Claude API format)
+    if (Array.isArray(message.content)) {
+      const arrayContent = message.content
+        .filter((item: any) => item && (item.type === 'text' || typeof item === 'string'))
+        .map((item: any) => {
+          if (typeof item === 'string') return item;
+          if (item.type === 'text') return item.text || '';
+          return item.content || item.text || '';
+        })
+        .join('\n');
+      if (arrayContent.trim()) {
+        return arrayContent;
+      }
+    }
+
+    // Method 3: Nested in message.content
+    if (message.message?.content) {
+      const messageContent: any = message.message.content;
+      if (typeof messageContent === 'string' && messageContent.trim()) {
+        return messageContent;
+      } else if (Array.isArray(messageContent)) {
+        const nestedContent = messageContent
+          .filter((item: any) => item && (item.type === 'text' || typeof item === 'string'))
+          .map((item: any) => {
+            if (typeof item === 'string') return item;
+            if (item.type === 'text') return item.text || '';
+            return item.content || item.text || '';
+          })
+          .join('\n');
+        if (nestedContent.trim()) {
+          return nestedContent;
+        }
+      }
+    }
+
+    // Method 4: Other fields
+    if ((message as any).result && typeof (message as any).result === 'string') {
+      return (message as any).result;
+    }
+    if ((message as any).summary && typeof (message as any).summary === 'string') {
+      return (message as any).summary;
+    }
+
+    return '';
+  };
+
+  /**
+   * Handle translation completion for a message
+   */
+  const handleTranslationComplete = (messageId: string, _originalMessage: ClaudeStreamMessage, result: TranslationResult, messageIndex: number) => {
+    console.log('[ClaudeCodeSession] ✅ Translation completed for message:', messageId);
+
+    // Update translation state
+    setTranslationStates(prev => ({
+      ...prev,
+      [messageId]: {
+        ...prev[messageId],
+        status: 'translated',
+        translatedContent: result.translatedText
+      }
+    }));
+
+    // Update the actual message in the messages array
+    setMessages(prevMessages => {
+      return prevMessages.map((msg, index) => {
+        if (index === messageIndex) {
+          // Apply the translation
+          return applyTranslationToMessage(msg, result);
+        }
+        return msg;
+      });
+    });
+  };
+
+  /**
+   * Apply translation result to a message
+   */
+  const applyTranslationToMessage = (message: ClaudeStreamMessage, result: TranslationResult): ClaudeStreamMessage => {
+    let processedMessage = { ...message };
+
+    // Apply translation based on the message structure
+    if (typeof message.content === 'string') {
+      processedMessage.content = result.translatedText;
+    } else if (Array.isArray(message.content)) {
+      processedMessage.content = message.content.map((item: any) => {
+        if (item && (item.type === 'text' || typeof item === 'string')) {
+          return typeof item === 'string'
+            ? { type: 'text', text: result.translatedText }
+            : { ...item, text: result.translatedText };
+        }
+        return item;
+      });
+    } else if (message.message?.content) {
+      if (typeof message.message.content === 'string') {
+        processedMessage.message = {
+          ...message.message,
+          content: [{ type: 'text', text: result.translatedText }]
+        };
+      } else if (Array.isArray(message.message.content)) {
+        processedMessage.message = {
+          ...message.message,
+          content: message.message.content.map((item: any) => {
+            if (item && (item.type === 'text' || typeof item === 'string')) {
+              return typeof item === 'string'
+                ? { type: 'text', text: result.translatedText }
+                : { ...item, text: result.translatedText };
+            }
+            return item;
+          })
+        };
+      }
+    } else if ((message as any).result) {
+      (processedMessage as any).result = result.translatedText;
+    } else if ((message as any).summary) {
+      (processedMessage as any).summary = result.translatedText;
+    }
+
+    return processedMessage;
+  };
+
+  // DEPRECATED: Legacy blocking translation function - replaced with progressive translation
+  // @ts-ignore - function kept for reference but not used
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const translateHistoricalMessages = async (messages: ClaudeStreamMessage[]): Promise<ClaudeStreamMessage[]> => {
+    try {
+      const isEnabled = await translationMiddleware.isEnabled();
+      if (!isEnabled) {
+        console.log('[ClaudeCodeSession] Translation disabled, returning original historical messages');
+        return messages;
+      }
+
+      console.log('[ClaudeCodeSession] Processing historical messages for translation');
+      const translatedMessages: ClaudeStreamMessage[] = [];
+
+      for (const message of messages) {
+        // Only skip system init messages from translation
+        if (message.type === "system" && message.subtype === "init") {
+          translatedMessages.push(message);
+          continue;
+        }
+
+        // Apply translation logic to both user messages and Claude responses
+        let processedMessage = { ...message };
+
+        // Extract text content using the same comprehensive extraction as real-time
+        let textContent = '';
+        let contentSources: string[] = [];
+
+        // Method 1: Direct content string
+        if (typeof message.content === 'string' && message.content.trim()) {
+          textContent = message.content;
+          contentSources.push('direct_content');
+        }
+        // Method 2: Array content (Claude API format)
+        else if (Array.isArray(message.content)) {
+          const arrayContent = message.content
+            .filter((item: any) => item && (item.type === 'text' || typeof item === 'string'))
+            .map((item: any) => {
+              if (typeof item === 'string') return item;
+              if (item.type === 'text') return item.text || '';
+              return item.content || item.text || '';
+            })
+            .join('\n');
+          if (arrayContent.trim()) {
+            textContent = arrayContent;
+            contentSources.push('array_content');
+          }
+        }
+        // Method 3: Object with text property
+        else if (message.content?.text && typeof message.content.text === 'string') {
+          textContent = message.content.text;
+          contentSources.push('content_text');
+        }
+        // Method 4: Nested in message.content (Claude Code SDK primary format)
+        else if (message.message?.content) {
+          const messageContent: any = message.message.content;
+          if (typeof messageContent === 'string' && messageContent.trim()) {
+            textContent = messageContent;
+            contentSources.push('message_content_string');
+          } else if (Array.isArray(messageContent)) {
+            const nestedContent = messageContent
+              .filter((item: any) => item && (item.type === 'text' || typeof item === 'string'))
+              .map((item: any) => {
+                if (typeof item === 'string') return item;
+                if (item.type === 'text') return item.text || '';
+                return item.content || item.text || '';
+              })
+              .join('\n');
+            if (nestedContent.trim()) {
+              textContent = nestedContent;
+              contentSources.push('message_content_array');
+            }
+          }
+        }
+
+        // Method 5: Other fields
+        if (!textContent && (message as any).text && typeof (message as any).text === 'string') {
+          textContent = (message as any).text;
+          contentSources.push('direct_text');
+        }
+        if (!textContent && (message as any).result && typeof (message as any).result === 'string') {
+          textContent = (message as any).result;
+          contentSources.push('result_field');
+        }
+        if (!textContent && (message as any).summary && typeof (message as any).summary === 'string') {
+          textContent = (message as any).summary;
+          contentSources.push('summary_field');
+        }
+
+        // Apply translation if content found
+        if (textContent.trim()) {
+          try {
+            const responseTranslation = await translationMiddleware.translateClaudeResponse(textContent);
+
+            if (responseTranslation.wasTranslated) {
+              console.log('[ClaudeCodeSession] Historical message translated:', {
+                sources: contentSources,
+                originalLength: textContent.length,
+                translatedLength: responseTranslation.translatedText.length
+              });
+
+              // Update content based on source, same as real-time logic
+              const primarySource = contentSources[0];
+              switch (primarySource) {
+                case 'direct_content':
+                  processedMessage.content = responseTranslation.translatedText;
+                  break;
+                case 'array_content':
+                  if (Array.isArray(message.content)) {
+                    processedMessage.content = message.content.map((item: any) => {
+                      if (item && (item.type === 'text' || typeof item === 'string')) {
+                        return typeof item === 'string'
+                          ? { type: 'text', text: responseTranslation.translatedText }
+                          : { ...item, text: responseTranslation.translatedText };
+                      }
+                      return item;
+                    });
+                  }
+                  break;
+                case 'content_text':
+                  processedMessage.content = {
+                    ...message.content,
+                    text: responseTranslation.translatedText
+                  };
+                  break;
+                case 'message_content_string':
+                  if (message.message) {
+                    processedMessage.message = {
+                      ...message.message,
+                      content: [{ type: 'text', text: responseTranslation.translatedText }]
+                    };
+                  }
+                  break;
+                case 'message_content_array':
+                  if (message.message?.content && Array.isArray(message.message.content)) {
+                    processedMessage.message = {
+                      ...message.message,
+                      content: message.message.content.map((item: any) => {
+                        if (item && (item.type === 'text' || typeof item === 'string')) {
+                          return typeof item === 'string'
+                            ? { type: 'text', text: responseTranslation.translatedText }
+                            : { ...item, text: responseTranslation.translatedText };
+                        }
+                        return item;
+                      })
+                    };
+                  }
+                  break;
+                case 'direct_text':
+                  (processedMessage as any).text = responseTranslation.translatedText;
+                  break;
+                case 'result_field':
+                  (processedMessage as any).result = responseTranslation.translatedText;
+                  break;
+                case 'summary_field':
+                  (processedMessage as any).summary = responseTranslation.translatedText;
+                  break;
+              }
+
+              // Add translation metadata
+              processedMessage.translationMeta = {
+                wasTranslated: responseTranslation.wasTranslated,
+                detectedLanguage: responseTranslation.detectedLanguage,
+                originalText: responseTranslation.originalText
+              };
+            }
+          } catch (translationError) {
+            console.error('[ClaudeCodeSession] Historical message translation failed:', translationError);
+            // Continue with original message if translation fails
+          }
+        }
+
+        // 🔧 CRITICAL FIX: Apply usage data normalization to historical messages
+        // This ensures cache tokens are correctly displayed after re-entering session
+        try {
+          if (processedMessage.message?.usage) {
+            processedMessage.message.usage = normalizeUsageData(processedMessage.message.usage);
+            console.log('[ClaudeCodeSession] ✅ Normalized historical message.usage data:', processedMessage.message.usage);
+          }
+          if (processedMessage.usage) {
+            processedMessage.usage = normalizeUsageData(processedMessage.usage);
+            console.log('[ClaudeCodeSession] ✅ Normalized historical top-level usage data:', processedMessage.usage);
+          }
+        } catch (usageNormalizationError) {
+          console.warn('[ClaudeCodeSession] Failed to normalize usage data for historical message:', usageNormalizationError);
+          // Continue with message even if normalization fails
+        }
+
+        translatedMessages.push(processedMessage);
+      }
+
+      console.log('[ClaudeCodeSession] Historical message translation complete');
+      return translatedMessages;
+    } catch (error) {
+      console.error('[ClaudeCodeSession] Historical message translation error:', error);
+      // Return original messages if batch translation fails
+      return messages;
     }
   };
 
@@ -433,15 +1145,19 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     const outputUnlisten = await listen<string>(`claude-output:${sessionId}`, async (event) => {
       try {
         console.log('[ClaudeCodeSession] Received claude-output on reconnect:', event.payload);
-        
+
         if (!isMountedRef.current) return;
-        
+
         // Store raw JSONL
         setRawJsonlOutput(prev => [...prev, event.payload]);
-        
-        // Parse and display
+
+        // 🔧 CRITICAL FIX: Apply translation to reconnect messages too
+        // Parse message
         const message = JSON.parse(event.payload) as ClaudeStreamMessage;
-        setMessages(prev => [...prev, message]);
+
+        // Apply translation using the same logic as handleStreamMessage
+        await processMessageWithTranslation(message, event.payload);
+
       } catch (err) {
         console.error("Failed to parse message:", err, event.payload);
       }
@@ -458,7 +1174,9 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       console.log('[ClaudeCodeSession] Received claude-complete on reconnect:', event.payload);
       if (isMountedRef.current) {
         setIsLoading(false);
-        // Keep session active after successful completion - don't reset hasActiveSessionRef
+        // 🔧 FIX: Reset hasActiveSessionRef when session completes
+        hasActiveSessionRef.current = false;
+        console.log('[ClaudeCodeSession] Reconnect session completed - ready for new input');
       }
     });
 
@@ -492,8 +1210,8 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
 
   // Smart model selection for Default mode
 
-  const handleSendPrompt = async (prompt: string, model: "sonnet" | "opus" | "sonnet1m") => {
-    console.log('[ClaudeCodeSession] handleSendPrompt called with:', { prompt, model, projectPath, claudeSessionId, effectiveSession });
+  const handleSendPrompt = async (prompt: string, model: "sonnet" | "opus" | "sonnet1m", thinkingInstruction?: string) => {
+    console.log('[ClaudeCodeSession] handleSendPrompt called with:', { prompt, model, projectPath, claudeSessionId, effectiveSession, thinkingInstruction });
     
     if (!projectPath) {
       setError("请先选择项目目录");
@@ -501,11 +1219,16 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     }
 
     // Check if this is a slash command and handle it appropriately
+    const isSlashCommandInput = isSlashCommand(prompt);
     const trimmedPrompt = prompt.trim();
-    const isSlashCommand = trimmedPrompt.startsWith('/');
     
-    if (isSlashCommand) {
-      console.log('[ClaudeCodeSession] Detected slash command:', trimmedPrompt);
+    if (isSlashCommandInput) {
+      const commandPreview = trimmedPrompt.split('\n')[0];
+      console.log('[ClaudeCodeSession] ✅ Detected slash command, bypassing translation:', {
+        command: commandPreview,
+        model: model,
+        projectPath: projectPath
+      });
       
       // For slash commands, we need to send them as-is to Claude CLI
       // Claude CLI should handle the slash command parsing and execution
@@ -529,12 +1252,16 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       setIsLoading(true);
       setError(null);
       hasActiveSessionRef.current = true;
-      
+
+      // 🌐 Translation: Process user input before sending to Claude
+      let processedPrompt = prompt;
+      let userInputTranslation: TranslationResult | null = null;
+
       // For resuming sessions, ensure we have the session ID
       if (effectiveSession && !claudeSessionId) {
         setClaudeSessionId(effectiveSession.id);
       }
-      
+
       // Only clean up and set up new listeners if not already listening
       if (!isListeningRef.current) {
         // Clean up previous listeners
@@ -584,12 +1311,10 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           unlistenRefs.current = [specificOutputUnlisten, specificErrorUnlisten, specificCompleteUnlisten];
         };
 
-        // Generic listeners (catch-all)
+        // Generic listeners (catch-all) - ALWAYS process to ensure user sees output
         const genericOutputUnlisten = await listen<string>('claude-output', async (event) => {
-          // Only handle generic events if we don't have session-specific listeners active
-          if (!currentSessionId) {
-            handleStreamMessage(event.payload, userInputTranslation || undefined);
-          }
+          // Always handle generic events as fallback to ensure output visibility
+          handleStreamMessage(event.payload, userInputTranslation || undefined);
 
           // Attempt to extract session_id on the fly (for the very first init)
           try {
@@ -628,188 +1353,15 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           try {
             // Don't process if component unmounted
             if (!isMountedRef.current) return;
-            
+
             // Store raw JSONL
             setRawJsonlOutput((prev) => [...prev, payload]);
 
             const message = JSON.parse(payload) as ClaudeStreamMessage;
-            
-            // Debug: Log all incoming messages to understand the structure
-            console.log('[ClaudeCodeSession] Raw message received:', {
-              type: message.type,
-              subtype: message.subtype,
-              hasContent: !!message.content,
-              hasMessage: !!message.message,
-              messageStructure: message.message ? Object.keys(message.message) : 'no message',
-              contentType: typeof message.content,
-              messageContent: message.message?.content ? (Array.isArray(message.message.content) ? message.message.content.length + ' items' : typeof message.message.content) : 'no message content',
-              firstContentItem: Array.isArray(message.message?.content) && message.message.content.length > 0 ? message.message.content[0] : 'none',
-              fullMessage: message, // 显示完整消息结构
-              payload: payload.substring(0, 300) + '...'
-            });
-            
-            // Add received timestamp for non-user messages
-            if (message.type !== "user") {
-              message.receivedAt = new Date().toISOString();
-            }
-            
-            // 🌐 Translation: Process Claude response
-            let processedMessage = { ...message };
-            
-            try {
-              const isEnabled = await translationMiddleware.isEnabled();
-              
-              // 使用传递的翻译结果或状态中的结果
-              const effectiveTranslationResult = currentTranslationResult || lastTranslationResult;
-              
-              console.log('[ClaudeCodeSession] Translation debug:', {
-                isEnabled,
-                hasCurrentResult: !!currentTranslationResult,
-                hasStateResult: !!lastTranslationResult,
-                hasEffectiveResult: !!effectiveTranslationResult,
-                messageType: message.type,
-                messageContent: message.content ? 'has content' : 'no content'
-              });
-              
-              // 扩展支持的消息类型，Claude Code可能使用不同的类型
-              const isClaudeResponse = message.type === "assistant" || 
-                                     (message.type === "result" && !message.subtype) ||
-                                     (message.type === "system" && message.subtype !== "init");
-              
-              if (isEnabled && effectiveTranslationResult && isClaudeResponse) {
-                console.log('[ClaudeCodeSession] Found Claude response message, checking translation conditions...');
-                
-                // Only translate Claude responses if user input was Chinese
-                const userInputWasChinese = effectiveTranslationResult.detectedLanguage === 'zh' && effectiveTranslationResult.wasTranslated;
-                console.log('[ClaudeCodeSession] User input was Chinese:', userInputWasChinese);
-                
-                if (userInputWasChinese) {
-                  // Extract text content from the message - support multiple formats
-                  let textContent = '';
-                  
-                  // Method 1: Direct content
-                  if (typeof message.content === 'string') {
-                    textContent = message.content;
-                  } 
-                  // Method 2: Array content
-                  else if (Array.isArray(message.content)) {
-                    textContent = message.content
-                      .filter((item: any) => item.type === 'text')
-                      .map((item: any) => item.text)
-                      .join('');
-                  }
-                  // Method 3: Object with text property
-                  else if (message.content?.text) {
-                    textContent = message.content.text;
-                  }
-                  // Method 4: Nested in message.content (主要的Claude Code格式)
-                  else if (message.message?.content) {
-                    if (typeof message.message.content === 'string') {
-                      textContent = message.message.content;
-                    } else if (Array.isArray(message.message.content)) {
-                      // 处理Claude Code的消息格式：[{type: "text", text: "..."}]
-                      textContent = message.message.content
-                        .filter((item: any) => item && (item.type === 'text' || typeof item === 'string'))
-                        .map((item: any) => {
-                          if (typeof item === 'string') return item;
-                          return item.text || item.content || '';
-                        })
-                        .join('');
-                    }
-                  }
-                  // Method 5: Direct text property
-                  else if (message.text) {
-                    textContent = message.text;
-                  }
-                  
-                  console.log('[ClaudeCodeSession] Extracted text content length:', textContent.length);
 
-                  if (textContent.trim()) {
-                    console.log('[ClaudeCodeSession] Translating Claude response to Chinese...');
-                    const responseTranslation = await translationMiddleware.translateClaudeResponse(
-                      textContent,
-                      userInputWasChinese
-                    );
+            // Use the shared translation function for consistency
+            await processMessageWithTranslation(message, payload, currentTranslationResult);
 
-                    if (responseTranslation.wasTranslated) {
-                      console.log('[ClaudeCodeSession] Claude response translated:', {
-                        original: responseTranslation.originalText.substring(0, 100) + '...',
-                        translated: responseTranslation.translatedText.substring(0, 100) + '...'
-                      });
-
-                      // 🔧 Critical Fix: 更新消息内容 - 支持Claude Code的消息格式
-                      console.log('[ClaudeCodeSession] Updating message content with translation...');
-                      
-                      // 根据实际的消息结构更新内容
-                      if (typeof message.content === 'string') {
-                        processedMessage.content = responseTranslation.translatedText;
-                        console.log('[ClaudeCodeSession] Updated direct content');
-                      } 
-                      else if (Array.isArray(message.content)) {
-                        processedMessage.content = message.content.map((item: any) => {
-                          if (item.type === 'text') {
-                            return { ...item, text: responseTranslation.translatedText };
-                          }
-                          return item;
-                        });
-                        console.log('[ClaudeCodeSession] Updated array content');
-                      } 
-                      else if (message.content?.text) {
-                        processedMessage.content = {
-                          ...message.content,
-                          text: responseTranslation.translatedText
-                        };
-                        console.log('[ClaudeCodeSession] Updated object content');
-                      }
-                      // 🎯 主要修复：更新message.content (Claude Code格式)
-                      else if (message.message?.content) {
-                        processedMessage.message = {
-                          ...message.message,
-                          content: Array.isArray(message.message.content) 
-                            ? message.message.content.map((item: any) => {
-                                if (item && (item.type === 'text' || typeof item === 'string')) {
-                                  return typeof item === 'string' 
-                                    ? { type: 'text', text: responseTranslation.translatedText }
-                                    : { ...item, text: responseTranslation.translatedText };
-                                }
-                                return item;
-                              })
-                            : [{ type: 'text', text: responseTranslation.translatedText }]
-                        };
-                        console.log('[ClaudeCodeSession] Updated message.content (Claude Code format)');
-                      }
-                      // 备用方案：如果没有找到合适的位置，创建新的内容结构
-                      else {
-                        processedMessage.content = [{
-                          type: 'text',
-                          text: responseTranslation.translatedText
-                        }];
-                        console.log('[ClaudeCodeSession] Created new content structure');
-                      }
-
-                      // Add translation metadata
-                      processedMessage.translationMeta = {
-                        wasTranslated: responseTranslation.wasTranslated,
-                        detectedLanguage: responseTranslation.detectedLanguage,
-                        originalText: responseTranslation.originalText
-                      };
-                      
-                      console.log('[ClaudeCodeSession] Final processed message structure:', {
-                        type: processedMessage.type,
-                        hasContent: !!processedMessage.content,
-                        hasMessage: !!processedMessage.message,
-                        messageContentLength: processedMessage.message?.content?.length || 'none'
-                      });
-                    }
-                  }
-                }
-              }
-            } catch (translationError) {
-              console.error('[ClaudeCodeSession] Response translation failed:', translationError);
-              // Continue with original message if translation fails
-            }
-            
-            setMessages((prev) => [...prev, processedMessage]);
           } catch (err) {
             console.error('Failed to parse message:', err, payload);
           }
@@ -818,16 +1370,16 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
         // Helper to handle completion events (both generic and scoped)
         const processComplete = async (success: boolean) => {
           setIsLoading(false);
-          // Keep session active after successful completion - don't reset hasActiveSessionRef
+          // 🔧 FIX: Reset hasActiveSessionRef when session completes to show correct UI state
+          hasActiveSessionRef.current = false;
           isListeningRef.current = false; // Reset listening state
-          
+
           // ✅ CRITICAL FIX: Reset currentSessionId to allow detection of new session_id
           // This ensures the next message will pick up the new session_id from Claude CLI
           currentSessionId = null;
-          console.log('[ClaudeCodeSession] Reset currentSessionId to allow new session detection');
-          
-          // Don't reset hasActiveSession here - keep it true so we can continue the conversation
-          // Only reset it when explicitly needed (like component unmount or error)
+          console.log('[ClaudeCodeSession] Session completed - reset session state for new input');
+
+          // Session is now ready to accept new input - UI will show input field instead of loading
 
           if (effectiveSession && success) {
             try {
@@ -881,34 +1433,50 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
         // 2️⃣  Auto-checkpoint logic moved after listener setup (unchanged)
         // --------------------------------------------------------------------
 
-        // 🌐 Translation: Process user input before sending to Claude
-        let processedPrompt = prompt;
-        let userInputTranslation: TranslationResult | null = null;
-        
-        try {
-          const isEnabled = await translationMiddleware.isEnabled();
-          if (isEnabled) {
-            console.log('[ClaudeCodeSession] Translation enabled, processing user input...');
-            userInputTranslation = await translationMiddleware.translateUserInput(prompt);
-            processedPrompt = userInputTranslation.translatedText;
-            
-            if (userInputTranslation.wasTranslated) {
-              console.log('[ClaudeCodeSession] User input translated:', {
-                original: userInputTranslation.originalText,
-                translated: userInputTranslation.translatedText,
-                language: userInputTranslation.detectedLanguage
-              });
+        // Skip translation entirely for slash commands
+        if (!isSlashCommandInput) {
+          try {
+            const isEnabled = await translationMiddleware.isEnabled();
+            if (isEnabled) {
+              console.log('[ClaudeCodeSession] Translation enabled, processing user input...');
+              // 确保传递给翻译中间件的参数与本地检测使用的参数一致
+              userInputTranslation = await translationMiddleware.translateUserInput(prompt);
+              processedPrompt = userInputTranslation.translatedText;
+
+              if (userInputTranslation.wasTranslated) {
+                console.log('[ClaudeCodeSession] User input translated:', {
+                  original: userInputTranslation.originalText,
+                  translated: userInputTranslation.translatedText,
+                  language: userInputTranslation.detectedLanguage
+                });
+              }
             }
+          } catch (translationError) {
+            console.error('[ClaudeCodeSession] Translation failed, using original prompt:', translationError);
+            // Continue with original prompt if translation fails
           }
-        } catch (translationError) {
-          console.error('[ClaudeCodeSession] Translation failed, using original prompt:', translationError);
-          // Continue with original prompt if translation fails
+        } else {
+          const commandPreview = trimmedPrompt.split('\n')[0];
+          console.log('[ClaudeCodeSession] ✅ Slash command detected, skipping translation:', {
+            command: commandPreview,
+            translationEnabled: await translationMiddleware.isEnabled()
+          });
         }
         
         // Store the translation result AFTER all processing for response translation
         if (userInputTranslation) {
           setLastTranslationResult(userInputTranslation);
           console.log('[ClaudeCodeSession] Stored translation result for response processing:', userInputTranslation);
+        }
+
+        // 🎯 CRITICAL FIX: Add thinking instruction AFTER translation, not before
+        // This ensures thinking instructions are not embedded within translated content
+        if (thinkingInstruction) {
+          console.log('[ClaudeCodeSession] Adding thinking instruction after translation:', thinkingInstruction);
+          // Add thinking instruction at the end with proper punctuation
+          const endsWithPunctuation = /[.!?]$/.test(processedPrompt.trim());
+          const separator = endsWithPunctuation ? ' ' : '. ';
+          processedPrompt = `${processedPrompt}${separator}${thinkingInstruction}.`;
         }
 
         // Add the user message immediately to the UI (show original text to user)
@@ -931,6 +1499,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           } : undefined
         };
         setMessages(prev => [...prev, userMessage]);
+      }
 
         // Execute the appropriate command based on session state
         // Use processedPrompt (potentially translated) for API calls
@@ -950,7 +1519,6 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           setIsFirstPrompt(false);
           await api.executeClaudeCode(projectPath, processedPrompt, model);
         }
-      }
     } catch (err) {
       console.error("Failed to send prompt:", err);
       setError("发送提示失败");
@@ -1000,7 +1568,15 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           }
         }
         if (msg.message.usage) {
-          markdown += `*Tokens: ${msg.message.usage.input_tokens} in, ${msg.message.usage.output_tokens} out*\n\n`;
+          const { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens } = msg.message.usage;
+          let tokenText = `*Tokens: ${input_tokens} in, ${output_tokens} out`;
+          if (cache_creation_tokens && cache_creation_tokens > 0) {
+            tokenText += `, creation: ${cache_creation_tokens}`;
+          }
+          if (cache_read_tokens && cache_read_tokens > 0) {
+            tokenText += `, read: ${cache_read_tokens}`;
+          }
+          markdown += tokenText + `*\n\n`;
         }
       } else if (msg.type === "user" && msg.message) {
         markdown += `## User\n\n`;
@@ -1135,7 +1711,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       const cancelMessage: ClaudeStreamMessage = {
         type: "system",
         subtype: "info",
-        result: "Session cancelled by user",
+        result: "用户已取消会话",
         timestamp: new Date().toISOString(),
         receivedAt: new Date().toISOString()
       };
@@ -1198,7 +1774,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       setForkSessionName("");
     } catch (err) {
       console.error("Failed to fork checkpoint:", err);
-      setError("Failed to fork checkpoint");
+      setError("分支检查点失败");
     } finally {
       setIsLoading(false);
     }
@@ -1691,7 +2267,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                       }
                     }}
                     className="px-3 py-2 hover:bg-accent rounded-none"
-                    title="Scroll to top"
+                    title="滚动到顶部"
                   >
                     <ChevronUp className="h-4 w-4" />
                   </Button>
@@ -1710,7 +2286,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                       }
                     }}
                     className="px-3 py-2 hover:bg-accent rounded-none"
-                    title="Scroll to bottom"
+                    title="滚动到底部"
                   >
                     <ChevronDown className="h-4 w-4" />
                   </Button>

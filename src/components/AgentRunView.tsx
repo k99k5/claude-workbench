@@ -146,7 +146,15 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({
           }
         }
         if (msg.message.usage) {
-          markdown += `*令牌: ${msg.message.usage.input_tokens} 输入, ${msg.message.usage.output_tokens} 输出*\n\n`;
+          const { input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens } = msg.message.usage;
+          let tokenText = `*令牌: ${input_tokens} 输入, ${output_tokens} 输出`;
+          if (cache_creation_tokens && cache_creation_tokens > 0) {
+            tokenText += `, 缓存创建: ${cache_creation_tokens}`;
+          }
+          if (cache_read_tokens && cache_read_tokens > 0) {
+            tokenText += `, 缓存读取: ${cache_read_tokens}`;
+          }
+          markdown += tokenText + `*\n\n`;
         }
       } else if (msg.type === "user" && msg.message) {
         markdown += `## 用户\n\n`;
@@ -327,7 +335,7 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({
                 <h3 className="text-sm font-medium">任务：</h3>
                 <p className="text-sm text-muted-foreground flex-1">{run.task}</p>
                 <Badge variant="outline" className="text-xs">
-                  {run.model === 'opus' ? 'Claude 4 Opus' : 'Claude 4 Sonnet'}
+                  {run.model === 'opus' ? 'Claude 4.1 Opus' : 'Claude 4 Sonnet'}
                 </Badge>
               </div>
               

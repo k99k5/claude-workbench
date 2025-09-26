@@ -36,7 +36,7 @@ export const AgentExecutionDemo: React.FC = () => {
             old_string: "reader.onerror = e => reject(new Error('Failed to read file'));"
           }
         }],
-        usage: { input_tokens: 4, output_tokens: 158 }
+        usage: { input_tokens: 4, output_tokens: 158, cache_creation_tokens: 33, cache_read_tokens: 155 }
       }
     },
     

@@ -43,7 +43,7 @@ use commands::mcp::{
 use commands::usage::{
     get_session_stats, get_usage_by_date_range, get_usage_details, get_usage_stats,
     get_today_usage_stats, get_usage_by_api_base_url, get_active_sessions, get_burn_rate_analysis,
-    get_usage_overview,
+    get_usage_overview, get_session_cache_tokens, get_realtime_usage_stats,
 };
 use commands::storage::{
     storage_list_tables, storage_read_table, storage_update_row, storage_delete_row,
@@ -60,7 +60,7 @@ use commands::provider::{
 use commands::translator::{
     translate, translate_batch, get_translation_config, update_translation_config,
     clear_translation_cache, get_translation_cache_stats, detect_text_language,
-    init_translation_service_command, init_translation_service_with_saved_config,
+    init_translation_service_command,
 };
 use process::ProcessRegistryState;
 use std::sync::Mutex;
@@ -222,6 +222,8 @@ fn main() {
             get_session_stats,
             get_active_sessions,
             get_burn_rate_analysis,
+            get_session_cache_tokens,
+            get_realtime_usage_stats,
             
             // MCP (Model Context Protocol)
             mcp_add,
@@ -276,6 +278,20 @@ fn main() {
             get_translation_cache_stats,
             detect_text_language,
             init_translation_service_command,
+
+            // Auto-Compact Context Management
+            commands::context_commands::init_auto_compact_manager,
+            commands::context_commands::register_auto_compact_session,
+            commands::context_commands::update_session_context,
+            commands::context_commands::trigger_manual_compaction,
+            commands::context_commands::get_auto_compact_config,
+            commands::context_commands::update_auto_compact_config,
+            commands::context_commands::get_session_context_stats,
+            commands::context_commands::get_all_monitored_sessions,
+            commands::context_commands::unregister_auto_compact_session,
+            commands::context_commands::stop_auto_compact_monitoring,
+            commands::context_commands::start_auto_compact_monitoring,
+            commands::context_commands::get_auto_compact_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
