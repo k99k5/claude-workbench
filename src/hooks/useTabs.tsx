@@ -20,7 +20,7 @@ export interface TabSession {
 interface TabContextValue {
   tabs: TabSession[];
   activeTabId: string | null;
-  createNewTab: (session?: Session, projectPath?: string) => string;
+  createNewTab: (session?: Session, projectPath?: string, activate?: boolean) => string;
   switchToTab: (tabId: string) => void;
   closeTab: (tabId: string, force?: boolean) => void;
   updateTabStreamingStatus: (tabId: string, isStreaming: boolean, sessionId: string | null) => void;
@@ -28,6 +28,8 @@ interface TabContextValue {
   updateTabTitle: (tabId: string, title: string) => void;
   getTabById: (tabId: string) => TabSession | undefined;
   getActiveTab: () => TabSession | undefined;
+  openSessionInBackground: (session: Session) => string;
+  getTabStats: () => { total: number; active: number; hasChanges: number };
 }
 
 const TabContext = createContext<TabContextValue | null>(null);
@@ -67,14 +69,14 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
   }, []);
 
   // 创建新标签页
-  const createNewTab = useCallback((session?: Session, projectPath?: string): string => {
+  const createNewTab = useCallback((session?: Session, projectPath?: string, activate: boolean = true): string => {
     const newTabId = generateTabId();
     const newTab: TabSession = {
       id: newTabId,
       title: generateTabTitle(session, projectPath),
       projectPath: projectPath || session?.project_path,
       session,
-      isActive: false,
+      isActive: false, // 先设为不活跃，稍后根据 activate 参数决定
       isLoading: false,
       hasChanges: false,
       createdAt: Date.now(),
@@ -82,13 +84,20 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
     };
 
     setTabs(prevTabs => {
-      // 先将所有标签页设为非活跃状态
-      const updatedTabs = prevTabs.map(tab => ({ ...tab, isActive: false }));
-      // 添加新标签页并设为活跃
-      return [...updatedTabs, { ...newTab, isActive: true }];
+      if (activate) {
+        // 如果要激活新标签页，将所有现有标签页设为非活跃状态
+        const updatedTabs = prevTabs.map(tab => ({ ...tab, isActive: false }));
+        return [...updatedTabs, { ...newTab, isActive: true }];
+      } else {
+        // 后台打开，保持当前活跃标签页不变
+        return [...prevTabs, newTab];
+      }
     });
 
-    setActiveTabId(newTabId);
+    if (activate) {
+      setActiveTabId(newTabId);
+    }
+
     return newTabId;
   }, [generateTabId, generateTabTitle]);
 
@@ -186,6 +195,20 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
     return tabs.find(tab => tab.isActive);
   }, [tabs]);
 
+  // 后台打开会话（不激活）
+  const openSessionInBackground = useCallback((session: Session): string => {
+    return createNewTab(session, undefined, false);
+  }, [createNewTab]);
+
+  // 获取标签页统计信息
+  const getTabStats = useCallback(() => {
+    return {
+      total: tabs.length,
+      active: tabs.filter(tab => tab.streamingStatus?.isStreaming).length,
+      hasChanges: tabs.filter(tab => tab.hasChanges).length,
+    };
+  }, [tabs]);
+
   const contextValue: TabContextValue = {
     tabs,
     activeTabId,
@@ -197,6 +220,8 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
     updateTabTitle,
     getTabById,
     getActiveTab,
+    openSessionInBackground,
+    getTabStats,
   };
 
   return (

@@ -33,5 +33,6 @@ export * from "./ui/scroll-area";
 export * from "./RunningClaudeSessions";
 export * from "./TabManager";
 export * from "./TabSessionWrapper";
+export * from "./TabIndicator";
 export * from "./AutoCompactSettings";
 export * from "./RealtimeCostWidget";

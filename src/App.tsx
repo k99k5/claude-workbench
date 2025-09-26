@@ -15,7 +15,8 @@ import { Settings } from "@/components/Settings";
 import { CCAgents } from "@/components/CCAgents";
 import { ClaudeCodeSession } from "@/components/ClaudeCodeSession";
 import { TabManager } from "@/components/TabManager";
-import { TabProvider } from "@/hooks/useTabs";
+import { TabProvider, useTabs } from "@/hooks/useTabs";
+import { TabIndicator } from "@/components/TabIndicator";
 import { UsageDashboard } from "@/components/UsageDashboard";
 import { MCPManager } from "@/components/MCPManager";
 import { ClaudeBinaryDialog } from "@/components/ClaudeBinaryDialog";
@@ -46,7 +47,19 @@ type View =
  * Main App component - Manages the Claude directory browser UI
  */
 function App() {
+  return (
+    <TabProvider>
+      <AppContent />
+    </TabProvider>
+  );
+}
+
+/**
+ * 应用内容组件 - 在 TabProvider 内部访问标签页状态
+ */
+function AppContent() {
   const { t } = useTranslation();
+  const { openSessionInBackground } = useTabs();
   const [view, setView] = useState<View>("welcome");
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
@@ -81,8 +94,13 @@ function App() {
   useEffect(() => {
     const handleSessionSelected = (event: CustomEvent) => {
       const { session } = event.detail;
-      setSelectedSession(session);
-      handleViewChange("claude-tab-manager");
+      // 在后台打开会话，不跳转页面
+      openSessionInBackground(session);
+      // 可选：显示一个通知告诉用户会话已在后台打开
+      setToast({
+        message: `会话 ${session.id.slice(-8)} 已在后台打开`,
+        type: "info"
+      });
     };
 
     const handleClaudeNotFound = () => {
@@ -387,8 +405,12 @@ function App() {
                         onBack={handleBack}
                         onEditClaudeFile={handleEditClaudeFile}
                         onSessionClick={(session) => {
-                          setSelectedSession(session);
-                          handleViewChange("claude-tab-manager");
+                          // 在后台打开会话，不跳转页面
+                          openSessionInBackground(session);
+                          setToast({
+                            message: `会话 ${session.id.slice(-8)} 已在后台打开`,
+                            type: "info"
+                          });
                         }}
                         onNewSession={(projectPath) => {
                           setSelectedSession(null); // Clear any existing session
@@ -425,8 +447,12 @@ function App() {
                       {/* Running Claude Sessions */}
                       <RunningClaudeSessions
                         onSessionClick={(session) => {
-                          setSelectedSession(session);
-                          handleViewChange("claude-tab-manager");
+                          // 在后台打开会话，不跳转页面
+                          openSessionInBackground(session);
+                          setToast({
+                            message: `会话 ${session.id.slice(-8)} 已在后台打开`,
+                            type: "info"
+                          });
                         }}
                       />
 
@@ -527,69 +553,74 @@ function App() {
   };
 
   return (
-    <TabProvider>
-      <OutputCacheProvider>
-        <div className="h-screen bg-background flex flex-col">
-            {/* Topbar */}
-            <Topbar
-              onClaudeClick={() => handleViewChange("editor")}
-              onSettingsClick={() => handleViewChange("settings")}
-              onUsageClick={() => handleViewChange("usage-dashboard")}
-              onMCPClick={() => handleViewChange("mcp")}
+    <OutputCacheProvider>
+      <div className="h-screen bg-background flex flex-col">
+          {/* Topbar */}
+          <Topbar
+            onClaudeClick={() => handleViewChange("editor")}
+            onSettingsClick={() => handleViewChange("settings")}
+            onUsageClick={() => handleViewChange("usage-dashboard")}
+            onMCPClick={() => handleViewChange("mcp")}
+          />
+
+          {/* 标签页指示器 */}
+          <div className="flex-shrink-0 px-4 py-2 border-b bg-muted/20">
+            <TabIndicator
+              onViewTabs={() => handleViewChange("claude-tab-manager")}
             />
-
-            {/* Main Content */}
-            <div className="flex-1 overflow-y-auto">
-              {renderContent()}
-            </div>
-
-            {/* NFO Credits Modal */}
-
-            {/* Claude Binary Dialog */}
-            <ClaudeBinaryDialog
-              open={showClaudeBinaryDialog}
-              onOpenChange={setShowClaudeBinaryDialog}
-              onSuccess={() => {
-                setToast({ message: t('messages.saved'), type: "success" });
-                // Trigger a refresh of the Claude version check
-                window.location.reload();
-              }}
-              onError={(message) => setToast({ message, type: "error" })}
-            />
-
-            {/* Navigation Confirmation Dialog */}
-            <Dialog open={showNavigationConfirm} onOpenChange={setShowNavigationConfirm}>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>确认离开</DialogTitle>
-                  <DialogDescription>
-                    Claude 正在处理您的请求。确定要离开当前会话吗？这将中断正在进行的对话。
-                  </DialogDescription>
-                </DialogHeader>
-                <DialogFooter>
-                  <Button variant="outline" onClick={handleNavigationCancel}>
-                    取消
-                  </Button>
-                  <Button onClick={handleNavigationConfirm}>
-                    确定离开
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-
-            {/* Toast Container */}
-            <ToastContainer>
-              {toast && (
-                <Toast
-                  message={toast.message}
-                  type={toast.type}
-                  onDismiss={() => setToast(null)}
-                />
-              )}
-            </ToastContainer>
           </div>
-        </OutputCacheProvider>
-      </TabProvider>
+
+          {/* Main Content */}
+          <div className="flex-1 overflow-y-auto">
+            {renderContent()}
+          </div>
+
+          {/* NFO Credits Modal */}
+
+          {/* Claude Binary Dialog */}
+          <ClaudeBinaryDialog
+            open={showClaudeBinaryDialog}
+            onOpenChange={setShowClaudeBinaryDialog}
+            onSuccess={() => {
+              setToast({ message: t('messages.saved'), type: "success" });
+              // Trigger a refresh of the Claude version check
+              window.location.reload();
+            }}
+            onError={(message) => setToast({ message, type: "error" })}
+          />
+
+          {/* Navigation Confirmation Dialog */}
+          <Dialog open={showNavigationConfirm} onOpenChange={setShowNavigationConfirm}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>确认离开</DialogTitle>
+                <DialogDescription>
+                  Claude 正在处理您的请求。确定要离开当前会话吗？这将中断正在进行的对话。
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="outline" onClick={handleNavigationCancel}>
+                  取消
+                </Button>
+                <Button onClick={handleNavigationConfirm}>
+                  确定离开
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Toast Container */}
+          <ToastContainer>
+            {toast && (
+              <Toast
+                message={toast.message}
+                type={toast.type}
+                onDismiss={() => setToast(null)}
+              />
+            )}
+          </ToastContainer>
+        </div>
+      </OutputCacheProvider>
   );
 }
 
