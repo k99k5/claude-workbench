@@ -34,7 +34,7 @@ import type { ClaudeStreamMessage } from "./AgentExecution";
 import { translationMiddleware, isSlashCommand, type TranslationResult } from '@/lib/translationMiddleware';
 import { progressiveTranslationManager, TranslationPriority, type TranslationState } from '@/lib/progressiveTranslation';
 import { useVirtualizer } from "@tanstack/react-virtual";
-// import { tokenExtractor } from '@/lib/tokenExtractor'; // Removed - token counter no longer displayed
+import { RealtimeCostWidget } from "./RealtimeCostWidget";
 
 interface ClaudeCodeSessionProps {
   /**
@@ -2128,7 +2128,17 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
             <div className="h-full flex flex-col max-w-5xl mx-auto">
               {projectPathInput}
               {messagesList}
-              
+
+              {/* Realtime Cost Display */}
+              {messages.length > 0 && (
+                <RealtimeCostWidget
+                  messages={messages}
+                  sessionId={effectiveSession?.id}
+                  position="inline"
+                  className="mt-4 mb-2"
+                />
+              )}
+
               {isLoading && messages.length === 0 && (
                 <div className="flex items-center justify-center h-full">
                   <div className="flex items-center gap-3">
@@ -2142,6 +2152,17 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
             </div>
           )}
         </div>
+
+        {/* Realtime Cost Widget - Shows live cost tracking */}
+        {messages.length > 0 && (
+          <RealtimeCostWidget
+            messages={messages}
+            sessionId={effectiveSession?.id}
+            position="bottom-right"
+            showDetails={true}
+            defaultExpanded={false}
+          />
+        )}
 
         {/* Floating Prompt Input - Always visible */}
         <ErrorBoundary>
