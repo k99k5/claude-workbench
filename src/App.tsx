@@ -14,6 +14,8 @@ import { ClaudeFileEditor } from "@/components/ClaudeFileEditor";
 import { Settings } from "@/components/Settings";
 import { CCAgents } from "@/components/CCAgents";
 import { ClaudeCodeSession } from "@/components/ClaudeCodeSession";
+import { TabManager } from "@/components/TabManager";
+import { TabProvider } from "@/hooks/useTabs";
 import { UsageDashboard } from "@/components/UsageDashboard";
 import { MCPManager } from "@/components/MCPManager";
 import { ClaudeBinaryDialog } from "@/components/ClaudeBinaryDialog";
@@ -28,6 +30,7 @@ type View =
   | "editor"
   | "claude-file-editor"
   | "claude-code-session"
+  | "claude-tab-manager"
   | "settings"
   | "cc-agents"
   | "create-agent"
@@ -136,7 +139,7 @@ function App() {
    * Opens a new Claude Code session in the interactive UI
    */
   const handleNewSession = async () => {
-    handleViewChange("claude-code-session");
+    handleViewChange("claude-tab-manager");
     setSelectedSession(null);
   };
 
@@ -386,7 +389,7 @@ function App() {
                         onNewSession={(projectPath) => {
                           setSelectedSession(null); // Clear any existing session
                           setNewSessionProjectPath(projectPath); // Store the project path for new session
-                          handleViewChange("claude-code-session");
+                          handleViewChange("claude-tab-manager");
                         }}
                       />
                     </motion.div>
@@ -469,6 +472,20 @@ function App() {
             onProjectSettings={handleProjectSettingsFromPath}
           />
         );
+
+      case "claude-tab-manager":
+        return (
+          <TabManager
+            initialSession={selectedSession || undefined}
+            initialProjectPath={newSessionProjectPath}
+            onBack={() => {
+              setSelectedSession(null);
+              setNewSessionProjectPath(""); // Clear the project path
+              handleViewChange("projects");
+            }}
+            onProjectSettings={handleProjectSettingsFromPath}
+          />
+        );
       
       case "usage-dashboard":
         return (
@@ -501,67 +518,69 @@ function App() {
   };
 
   return (
-    <OutputCacheProvider>
-      <div className="h-screen bg-background flex flex-col">
-          {/* Topbar */}
-          <Topbar
-            onClaudeClick={() => handleViewChange("editor")}
-            onSettingsClick={() => handleViewChange("settings")}
-            onUsageClick={() => handleViewChange("usage-dashboard")}
-            onMCPClick={() => handleViewChange("mcp")}
-          />
-          
-          {/* Main Content */}
-          <div className="flex-1 overflow-y-auto">
-            {renderContent()}
-          </div>
-          
-          {/* NFO Credits Modal */}
-          
-          {/* Claude Binary Dialog */}
-          <ClaudeBinaryDialog
-            open={showClaudeBinaryDialog}
-            onOpenChange={setShowClaudeBinaryDialog}
-            onSuccess={() => {
-              setToast({ message: t('messages.saved'), type: "success" });
-              // Trigger a refresh of the Claude version check
-              window.location.reload();
-            }}
-            onError={(message) => setToast({ message, type: "error" })}
-          />
+    <TabProvider>
+      <OutputCacheProvider>
+        <div className="h-screen bg-background flex flex-col">
+            {/* Topbar */}
+            <Topbar
+              onClaudeClick={() => handleViewChange("editor")}
+              onSettingsClick={() => handleViewChange("settings")}
+              onUsageClick={() => handleViewChange("usage-dashboard")}
+              onMCPClick={() => handleViewChange("mcp")}
+            />
 
-          {/* Navigation Confirmation Dialog */}
-          <Dialog open={showNavigationConfirm} onOpenChange={setShowNavigationConfirm}>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>确认离开</DialogTitle>
-                <DialogDescription>
-                  Claude 正在处理您的请求。确定要离开当前会话吗？这将中断正在进行的对话。
-                </DialogDescription>
-              </DialogHeader>
-              <DialogFooter>
-                <Button variant="outline" onClick={handleNavigationCancel}>
-                  取消
-                </Button>
-                <Button onClick={handleNavigationConfirm}>
-                  确定离开
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-          
-          {/* Toast Container */}
-          <ToastContainer>
-            {toast && (
-              <Toast
-                message={toast.message}
-                type={toast.type}
-                onDismiss={() => setToast(null)}
-              />
-            )}
-          </ToastContainer>
-        </div>
-      </OutputCacheProvider>
+            {/* Main Content */}
+            <div className="flex-1 overflow-y-auto">
+              {renderContent()}
+            </div>
+
+            {/* NFO Credits Modal */}
+
+            {/* Claude Binary Dialog */}
+            <ClaudeBinaryDialog
+              open={showClaudeBinaryDialog}
+              onOpenChange={setShowClaudeBinaryDialog}
+              onSuccess={() => {
+                setToast({ message: t('messages.saved'), type: "success" });
+                // Trigger a refresh of the Claude version check
+                window.location.reload();
+              }}
+              onError={(message) => setToast({ message, type: "error" })}
+            />
+
+            {/* Navigation Confirmation Dialog */}
+            <Dialog open={showNavigationConfirm} onOpenChange={setShowNavigationConfirm}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>确认离开</DialogTitle>
+                  <DialogDescription>
+                    Claude 正在处理您的请求。确定要离开当前会话吗？这将中断正在进行的对话。
+                  </DialogDescription>
+                </DialogHeader>
+                <DialogFooter>
+                  <Button variant="outline" onClick={handleNavigationCancel}>
+                    取消
+                  </Button>
+                  <Button onClick={handleNavigationConfirm}>
+                    确定离开
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            {/* Toast Container */}
+            <ToastContainer>
+              {toast && (
+                <Toast
+                  message={toast.message}
+                  type={toast.type}
+                  onDismiss={() => setToast(null)}
+                />
+              )}
+            </ToastContainer>
+          </div>
+        </OutputCacheProvider>
+      </TabProvider>
   );
 }
 
