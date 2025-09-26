@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 import { tokenExtractor } from "@/lib/tokenExtractor";
 import type { ClaudeStreamMessage } from "@/components/AgentExecution";
 import { useTranslation } from "@/hooks/useTranslation";
+import { useSessionActivityStatus } from "@/hooks/useSessionActivityStatus";
 
 // Global state to prevent multiple simultaneous checks
 let isChecking = false;
@@ -95,7 +96,8 @@ interface StatusInfo {
 export const ClaudeStatusIndicator: React.FC<ClaudeStatusIndicatorProps> = ({
   className,
   onSettingsClick,
-  messages = []
+  messages = [],
+  sessionId
 }) => {
   const { t } = useTranslation();
   const [statusInfo, setStatusInfo] = useState<StatusInfo>({
@@ -103,9 +105,28 @@ export const ClaudeStatusIndicator: React.FC<ClaudeStatusIndicatorProps> = ({
   });
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Calculate cost from messages
+  // Activity status monitoring
+  const sessionActivity = useSessionActivityStatus({
+    sessionId,
+    enableRealTimeTracking: true,
+    pollInterval: 30000,
+    activityTimeoutMinutes: 30
+  });
+
+  // Calculate cost from messages with activity-aware logic
   const sessionCost = useMemo(() => {
     if (messages.length === 0) return 0;
+
+    // Only show costs for active sessions to prevent accumulation on inactive sessions
+    if (!sessionActivity.shouldTrackCost && !sessionActivity.isCurrentSession) {
+      console.log('[ClaudeStatusIndicator] Session not active, skipping cost display', {
+        sessionId,
+        activityState: sessionActivity.activityState,
+        isCurrentSession: sessionActivity.isCurrentSession,
+        shouldTrackCost: sessionActivity.shouldTrackCost
+      });
+      return 0;
+    }
 
     let totalCost = 0;
     const relevantMessages = messages.filter(m => m.type === 'assistant' || m.type === 'user');
@@ -131,7 +152,7 @@ export const ClaudeStatusIndicator: React.FC<ClaudeStatusIndicatorProps> = ({
     });
 
     return totalCost;
-  }, [messages.length]);
+  }, [messages.length, sessionActivity.shouldTrackCost, sessionActivity.isCurrentSession]);
 
   // Format cost display
   const formatCost = (amount: number): string => {
@@ -299,8 +320,17 @@ export const ClaudeStatusIndicator: React.FC<ClaudeStatusIndicatorProps> = ({
                   </Badge>
                 )}
                 {sessionCost > 0 && (
-                  <Badge variant="outline" className="text-xs ml-1 font-mono">
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "text-xs ml-1 font-mono",
+                      sessionActivity.shouldTrackCost ?
+                        "border-green-200 bg-green-50 text-green-800 dark:border-green-800 dark:bg-green-900 dark:text-green-300" :
+                        "border-gray-200 bg-gray-50 text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400"
+                    )}
+                  >
                     {formatCost(sessionCost)}
+                    {!sessionActivity.shouldTrackCost && " (archived)"}
                   </Badge>
                 )}
               </motion.div>

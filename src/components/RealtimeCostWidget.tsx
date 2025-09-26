@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { DollarSign, TrendingUp, Hash, ChevronDown, ChevronUp } from 'lucide-react';
+import { DollarSign, TrendingUp, Hash, ChevronDown, ChevronUp, Clock, AlertTriangle } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -9,6 +9,7 @@ import { api } from '@/lib/api';
 import { tokenExtractor } from '@/lib/tokenExtractor';
 import { cn } from '@/lib/utils';
 import type { ClaudeStreamMessage } from './AgentExecution';
+import { useSessionActivityStatus } from '@/hooks/useSessionActivityStatus';
 
 interface RealtimeCostWidgetProps {
   /**
@@ -81,7 +82,7 @@ const MODEL_PRICING = {
  */
 export const RealtimeCostWidget: React.FC<RealtimeCostWidgetProps> = ({
   messages,
-  sessionId: _sessionId,
+  sessionId,
   defaultExpanded = false,
   position = 'bottom-right',
   className,
@@ -101,6 +102,14 @@ export const RealtimeCostWidget: React.FC<RealtimeCostWidgetProps> = ({
   const [todayTotal, setTodayTotal] = useState<number | null>(null);
   const updateTimerRef = useRef<NodeJS.Timeout>();
 
+  // Activity status monitoring
+  const sessionActivity = useSessionActivityStatus({
+    sessionId,
+    enableRealTimeTracking: true,
+    pollInterval: 30000,
+    activityTimeoutMinutes: 30
+  });
+
   // Calculate cost from tokens and model
   const calculateCost = (tokens: any, model?: string) => {
     const modelKey = model?.toLowerCase().includes('opus') ? 'claude-3-opus-20240229' :
@@ -118,9 +127,33 @@ export const RealtimeCostWidget: React.FC<RealtimeCostWidgetProps> = ({
     return inputCost + outputCost + cacheWriteCost + cacheReadCost;
   };
 
-  // Memoize expensive calculations
+  // Memoize expensive calculations with activity-aware logic
   const calculatedStats = useMemo(() => {
+    // Early return for empty messages
     if (messages.length === 0) {
+      return {
+        stats: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheWriteTokens: 0,
+          cacheReadTokens: 0,
+          totalTokens: 0,
+          messageCount: 0,
+          efficiency: 0
+        },
+        cost: 0
+      };
+    }
+
+    // Only track costs for active sessions to prevent accumulation on inactive sessions
+    if (!sessionActivity.shouldTrackCost && !sessionActivity.isCurrentSession) {
+      console.log('[RealtimeCostWidget] Session not active, skipping cost calculation', {
+        sessionId,
+        activityState: sessionActivity.activityState,
+        isCurrentSession: sessionActivity.isCurrentSession,
+        shouldTrackCost: sessionActivity.shouldTrackCost
+      });
+
       return {
         stats: {
           inputTokens: 0,
@@ -176,7 +209,7 @@ export const RealtimeCostWidget: React.FC<RealtimeCostWidgetProps> = ({
       },
       cost: totalCostCalc
     };
-  }, [messages.length]); // Only recalculate when message count changes, not on every update
+  }, [messages.length, sessionActivity.shouldTrackCost, sessionActivity.isCurrentSession]); // Include activity status in dependencies
 
   // Update state with debounce to prevent rapid updates
   useEffect(() => {
@@ -244,8 +277,19 @@ export const RealtimeCostWidget: React.FC<RealtimeCostWidgetProps> = ({
         <CardContent className="p-4">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <DollarSign className="h-4 w-4 text-green-500" />
-              <span className="font-medium text-sm">Session Cost</span>
+              <DollarSign className={cn(
+                "h-4 w-4",
+                sessionActivity.shouldTrackCost ? "text-green-500" : "text-gray-400"
+              )} />
+              <span className="font-medium text-sm">
+                {sessionActivity.shouldTrackCost ? "Live Session Cost" : "Session Cost"}
+              </span>
+              {sessionActivity.activityState === 'inactive' && (
+                <Clock className="h-3.5 w-3.5 text-orange-500" />
+              )}
+              {sessionActivity.activityState === 'expired' && (
+                <AlertTriangle className="h-3.5 w-3.5 text-red-500" />
+              )}
             </div>
             <Button
               variant="ghost"
@@ -332,10 +376,21 @@ export const RealtimeCostWidget: React.FC<RealtimeCostWidgetProps> = ({
         <CardContent className="p-3">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-1.5">
-              <DollarSign className="h-3.5 w-3.5 text-green-500" />
-              <span className="text-xs font-medium">Live Cost</span>
-              {totalCost > 0.10 && (
+              <DollarSign className={cn(
+                "h-3.5 w-3.5",
+                sessionActivity.shouldTrackCost ? "text-green-500" : "text-gray-400"
+              )} />
+              <span className="text-xs font-medium">
+                {sessionActivity.shouldTrackCost ? "Live Cost" : "Session Cost"}
+              </span>
+              {totalCost > 0.10 && sessionActivity.shouldTrackCost && (
                 <TrendingUp className="h-3 w-3 text-yellow-500" />
+              )}
+              {sessionActivity.activityState === 'inactive' && (
+                <Clock className="h-3 w-3 text-orange-500" />
+              )}
+              {sessionActivity.activityState === 'expired' && (
+                <AlertTriangle className="h-3 w-3 text-red-500" />
               )}
             </div>
             <Button
@@ -386,6 +441,34 @@ export const RealtimeCostWidget: React.FC<RealtimeCostWidgetProps> = ({
                 <span className="text-muted-foreground">Messages</span>
                 <span className="font-medium">{sessionStats.messageCount}</span>
               </div>
+
+              {/* Session Activity Status */}
+              <div className="flex items-center justify-between text-xs pt-1 border-t">
+                <span className="text-muted-foreground">Status</span>
+                <div className="flex items-center gap-1">
+                  <Badge
+                    variant={sessionActivity.activityState === 'active' ? 'default' : 'secondary'}
+                    className={cn(
+                      "text-xs px-1 py-0",
+                      sessionActivity.activityState === 'active' && "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300",
+                      sessionActivity.activityState === 'inactive' && "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300",
+                      sessionActivity.activityState === 'expired' && "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
+                    )}
+                  >
+                    {sessionActivity.activityState}
+                  </Badge>
+                </div>
+              </div>
+
+              {/* Time Remaining for Active Sessions */}
+              {sessionActivity.isActive && sessionActivity.timeRemainingHours > 0 && (
+                <div className="flex items-center justify-between text-xs pt-1">
+                  <span className="text-muted-foreground">Time Left</span>
+                  <span className="font-medium text-green-600">
+                    {sessionActivity.timeRemainingHours.toFixed(1)}h
+                  </span>
+                </div>
+              )}
             </motion.div>
           )}
         </CardContent>

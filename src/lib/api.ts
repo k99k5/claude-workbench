@@ -2610,4 +2610,17 @@ export const api = {
     }
   },
 
+  /**
+   * Gets active sessions information
+   * @returns Promise resolving to array of active session info
+   */
+  async getActiveSessions(): Promise<any[]> {
+    try {
+      return await invoke("get_active_sessions");
+    } catch (error) {
+      console.error('Failed to get active sessions:', error);
+      throw error;
+    }
+  },
+
 };

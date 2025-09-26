@@ -574,7 +574,7 @@ export const ReadResultWidget: React.FC<{ content: string; filePath?: string }> 
 
   return (
     <div className="rounded-lg overflow-hidden border bg-zinc-950 w-full">
-      <div className="px-4 py-2 border-b bg-zinc-900/50 flex items-center justify-between">
+      <div className="px-4 py-2 border-b bg-zinc-700/30 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <FileText className="h-3.5 w-3.5 text-muted-foreground" />
           <span className="text-xs font-mono text-muted-foreground">
@@ -627,11 +627,6 @@ export const ReadResultWidget: React.FC<{ content: string; filePath?: string }> 
         </div>
       )}
       
-      {isLargeFile && !isExpanded && (
-        <div className="px-4 py-3 text-xs text-muted-foreground text-center bg-zinc-900/30">
-          Click "展开" to view the full file
-        </div>
-      )}
     </div>
   );
 };
@@ -725,7 +720,7 @@ export const BashWidget: React.FC<{
 
   return (
     <div className="rounded-lg border bg-zinc-950 overflow-hidden">
-      <div className="px-4 py-2 bg-zinc-900/50 flex items-center gap-2 border-b">
+      <div className="px-4 py-2 bg-zinc-700/30 flex items-center gap-2 border-b">
         <Terminal className="h-3.5 w-3.5 text-green-500" />
         <span className="text-xs font-mono text-muted-foreground">终端</span>
         {description && (
@@ -1291,7 +1286,7 @@ export const BashOutputWidget: React.FC<{
 
   return (
     <div className="rounded-lg border bg-zinc-950 overflow-hidden">
-      <div className="px-4 py-2 bg-zinc-900/50 flex items-center gap-2 border-b">
+      <div className="px-4 py-2 bg-zinc-700/30 flex items-center gap-2 border-b">
         <Terminal className="h-3.5 w-3.5 text-blue-500" />
         <span className="text-xs font-mono text-muted-foreground">Bash 输出</span>
         <code className="text-xs font-mono text-blue-400">ID: {bash_id}</code>
@@ -1576,6 +1571,7 @@ export const MCPWidget: React.FC<{
 }> = ({ toolName, input, result: _result }) => {
   const { theme } = useTheme();
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isParametersExpanded, setIsParametersExpanded] = useState(false);
   
   // Parse the tool name to extract components
   // Format: mcp__namespace__method
@@ -1617,7 +1613,7 @@ export const MCPWidget: React.FC<{
   return (
     <div className="rounded-lg border border-violet-500/20 bg-gradient-to-br from-violet-500/5 to-purple-500/5 overflow-hidden">
       {/* Header */}
-      <div className="px-4 py-3 bg-gradient-to-r from-violet-500/10 to-purple-500/10 border-b border-violet-500/20">
+      <div className="px-4 py-3 bg-zinc-700/30 border-b border-violet-500/20">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="relative">
@@ -1626,113 +1622,131 @@ export const MCPWidget: React.FC<{
             </div>
             <span className="text-sm font-medium text-violet-600 dark:text-violet-400">MCP 工具</span>
           </div>
-          {hasInput && (
-            <div className="flex items-center gap-2">
-              <Badge 
-                variant="outline" 
+          <div className="flex items-center gap-2">
+            {hasInput && (
+              <Badge
+                variant="outline"
                 className="text-xs border-violet-500/30 text-violet-600 dark:text-violet-400"
               >
                 ~{inputTokens} 令牌
               </Badge>
-              {isLargeInput && (
-                <button
-                  onClick={() => setIsExpanded(!isExpanded)}
-                  className="text-violet-500 hover:text-violet-600 transition-colors"
-                >
-                  {isExpanded ? (
-                    <ChevronUp className="h-3.5 w-3.5" />
-                  ) : (
-                    <ChevronDown className="h-3.5 w-3.5" />
-                  )}
-                </button>
+            )}
+            <button
+              onClick={() => setIsExpanded(!isExpanded)}
+              className="text-violet-500 hover:text-violet-600 transition-colors"
+            >
+              {isExpanded ? (
+                <ChevronUp className="h-3.5 w-3.5" />
+              ) : (
+                <ChevronDown className="h-3.5 w-3.5" />
               )}
-            </div>
-          )}
+            </button>
+          </div>
         </div>
       </div>
       
-      {/* Tool Path */}
-      <div className="px-4 py-3 space-y-3">
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-violet-500 font-medium">MCP</span>
-          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-          <span className="text-purple-600 dark:text-purple-400 font-medium">
-            {formatNamespace(namespace)}
-          </span>
-          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-          <div className="flex items-center gap-1.5">
-            <Zap className="h-3.5 w-3.5 text-violet-500" />
-            <code className="text-sm font-mono font-semibold text-foreground">
-              {formatMethod(method)}
-              <span className="text-muted-foreground">()</span>
+      {/* Collapsible Content */}
+      {isExpanded && (
+        <div className="px-4 py-3 space-y-3">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-violet-500 font-medium">MCP</span>
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-purple-600 dark:text-purple-400 font-medium">
+              {formatNamespace(namespace)}
+            </span>
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+            <div className="flex items-center gap-1.5">
+              <Zap className="h-3.5 w-3.5 text-violet-500" />
+              <code className="text-sm font-mono font-semibold text-foreground">
+                {formatMethod(method)}
+                <span className="text-muted-foreground">()</span>
+              </code>
+            </div>
+          </div>
+
+          {/* Input Parameters */}
+          {hasInput && (
+            <div className={cn(
+              "transition-all duration-200",
+              !isParametersExpanded && isLargeInput && "max-h-[200px]"
+            )}>
+              <div className="relative">
+                <div className={cn(
+                  "rounded-lg border bg-zinc-950 overflow-hidden",
+                  !isParametersExpanded && isLargeInput && "max-h-[200px]"
+                )}>
+                  <div className="px-3 py-2 border-b bg-zinc-700/30 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Code className="h-3 w-3 text-violet-500" />
+                      <span className="text-xs font-mono text-muted-foreground">参数</span>
+                    </div>
+                    {isLargeInput && (
+                      <button
+                        onClick={() => setIsParametersExpanded(!isParametersExpanded)}
+                        className="text-violet-500 hover:text-violet-600 transition-colors"
+                      >
+                        {isParametersExpanded ? (
+                          <ChevronUp className="h-3 w-3" />
+                        ) : (
+                          <ChevronDown className="h-3 w-3" />
+                        )}
+                      </button>
+                    )}
+                  </div>
+                  <div className={cn(
+                    "overflow-auto",
+                    !isParametersExpanded && isLargeInput && "max-h-[150px]"
+                  )}>
+                    <SyntaxHighlighter
+                      language="json"
+                      style={getClaudeSyntaxTheme(theme === 'dark')}
+                      customStyle={{
+                        margin: 0,
+                        padding: '0.75rem',
+                        background: 'transparent',
+                        fontSize: '0.75rem',
+                        lineHeight: '1.5',
+                      }}
+                      wrapLongLines={false}
+                    >
+                      {inputString}
+                    </SyntaxHighlighter>
+                  </div>
+                </div>
+
+                {/* Gradient fade for collapsed view */}
+                {!isParametersExpanded && isLargeInput && (
+                  <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-zinc-950/80 to-transparent pointer-events-none" />
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* No input message */}
+          {!hasInput && (
+            <div className="text-xs text-muted-foreground italic px-2">
+              不需要参数
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Collapsed preview */}
+      {!isExpanded && (
+        <div className="px-4 py-2 text-sm">
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <span className="text-violet-500 font-medium">MCP</span>
+            <ChevronRight className="h-3 w-3" />
+            <span className="text-purple-600 dark:text-purple-400">
+              {formatNamespace(namespace)}
+            </span>
+            <ChevronRight className="h-3 w-3" />
+            <code className="text-sm font-mono text-foreground">
+              {formatMethod(method)}()
             </code>
           </div>
         </div>
-        
-        {/* Input Parameters */}
-        {hasInput && (
-          <div className={cn(
-            "transition-all duration-200",
-            !isExpanded && isLargeInput && "max-h-[200px]"
-          )}>
-            <div className="relative">
-              <div className={cn(
-                "rounded-lg border bg-zinc-950/50 overflow-hidden",
-                !isExpanded && isLargeInput && "max-h-[200px]"
-              )}>
-                <div className="px-3 py-2 border-b bg-zinc-900/50 flex items-center gap-2">
-                  <Code className="h-3 w-3 text-violet-500" />
-                  <span className="text-xs font-mono text-muted-foreground">参数</span>
-                </div>
-                <div className={cn(
-                  "overflow-auto",
-                  !isExpanded && isLargeInput && "max-h-[150px]"
-                )}>
-                  <SyntaxHighlighter
-                    language="json"
-                    style={getClaudeSyntaxTheme(theme === 'dark')}
-                    customStyle={{
-                      margin: 0,
-                      padding: '0.75rem',
-                      background: 'transparent',
-                      fontSize: '0.75rem',
-                      lineHeight: '1.5',
-                    }}
-                    wrapLongLines={false}
-                  >
-                    {inputString}
-                  </SyntaxHighlighter>
-                </div>
-              </div>
-              
-              {/* Gradient fade for collapsed view */}
-              {!isExpanded && isLargeInput && (
-                <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-zinc-950/80 to-transparent pointer-events-none" />
-              )}
-            </div>
-            
-            {/* Expand hint */}
-            {!isExpanded && isLargeInput && (
-              <div className="text-center mt-2">
-                <button
-                  onClick={() => setIsExpanded(true)}
-                  className="text-xs text-violet-500 hover:text-violet-600 transition-colors inline-flex items-center gap-1"
-                >
-                  <ChevronDown className="h-3 w-3" />
-                  显示完整参数
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-        
-        {/* No input message */}
-        {!hasInput && (
-          <div className="text-xs text-muted-foreground italic px-2">
-            不需要参数
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 };
@@ -1747,7 +1761,7 @@ export const CommandWidget: React.FC<{
 }> = ({ commandName, commandMessage, commandArgs }) => {
   return (
     <div className="rounded-lg border bg-zinc-950/50 overflow-hidden">
-      <div className="px-4 py-2 border-b bg-zinc-900/50 flex items-center gap-2">
+      <div className="px-4 py-2 border-b bg-zinc-700/30 flex items-center gap-2">
         <Terminal className="h-3.5 w-3.5 text-blue-500" />
         <span className="text-xs font-mono text-blue-400">命令</span>
       </div>
@@ -1857,7 +1871,7 @@ export const CommandOutputWidget: React.FC<{
 
   return (
     <div className="rounded-lg border bg-zinc-950/50 overflow-hidden">
-      <div className="px-4 py-2 bg-zinc-900/50 flex items-center gap-2">
+      <div className="px-4 py-2 bg-zinc-700/30 flex items-center gap-2">
         <ChevronRight className="h-3 w-3 text-green-500" />
         <span className="text-xs font-mono text-green-400">输出</span>
       </div>
@@ -2760,13 +2774,13 @@ export const ThinkingWidget: React.FC<{
 /**
  * Widget for WebFetch tool - displays URL fetching with optional prompts
  */
-export const WebFetchWidget: React.FC<{ 
+export const WebFetchWidget: React.FC<{
   url: string;
   prompt?: string;
   result?: any;
 }> = ({ url, prompt, result }) => {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [showFullContent, setShowFullContent] = useState(false);
+  const [isContentExpanded, setIsContentExpanded] = useState(false);
   
   // Extract result content if available
   let fetchedContent = '';
@@ -2797,7 +2811,7 @@ export const WebFetchWidget: React.FC<{
   // Truncate content for preview
   const maxPreviewLength = 500;
   const isTruncated = fetchedContent.length > maxPreviewLength;
-  const previewContent = isTruncated && !showFullContent
+  const previewContent = isTruncated && !isContentExpanded
     ? fetchedContent.substring(0, maxPreviewLength) + '...'
     : fetchedContent;
   
@@ -2885,45 +2899,32 @@ export const WebFetchWidget: React.FC<{
           ) : (
             <div className="p-3 space-y-2">
               {/* Content Header */}
-              <div className="flex items-center justify-between">
+              <div className="px-4 py-2 border-b bg-zinc-700/30 flex items-center justify-between">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <FileText className="h-3.5 w-3.5" />
                   <span>从 {getDomain(url)} 获取的内容</span>
                 </div>
                 {isTruncated && (
                   <button
-                    onClick={() => setShowFullContent(!showFullContent)}
-                    className="text-xs text-purple-500 hover:text-purple-600 transition-colors flex items-center gap-1"
+                    onClick={() => setIsContentExpanded(!isContentExpanded)}
+                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
                   >
-                    {showFullContent ? (
-                      <>
-                        <ChevronUp className="h-3 w-3" />
-                        显示更少
-                      </>
-                    ) : (
-                      <>
-                        <ChevronDown className="h-3 w-3" />
-                        显示完整内容
-                      </>
-                    )}
+                    <ChevronRight className={cn("h-3 w-3 transition-transform", isContentExpanded && "rotate-90")} />
+                    <span>{isContentExpanded ? '收起' : '展开'}</span>
                   </button>
                 )}
               </div>
               
               {/* Fetched Content */}
-              <div className="relative">
-                <div className={cn(
-                  "rounded-lg bg-muted/30 p-3 overflow-hidden",
-                  !showFullContent && isTruncated && "max-h-[300px]"
-                )}>
-                  <pre className="text-sm font-mono text-foreground/90 whitespace-pre-wrap">
-                    {previewContent}
-                  </pre>
-                  {!showFullContent && isTruncated && (
-                    <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-muted/30 to-transparent pointer-events-none" />
-                  )}
+              {(!isTruncated || isContentExpanded) && (
+                <div className="relative">
+                  <div className="rounded-lg bg-muted/30 p-3 overflow-hidden">
+                    <pre className="text-sm font-mono text-foreground/90 whitespace-pre-wrap">
+                      {previewContent}
+                    </pre>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
         </div>
