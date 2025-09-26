@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { 
+import {
   ArrowLeft,
   Terminal,
   FolderOpen,
@@ -10,7 +10,6 @@ import {
   Settings,
   ChevronUp,
   X,
-  Hash,
   Command
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -35,7 +34,7 @@ import type { ClaudeStreamMessage } from "./AgentExecution";
 import { translationMiddleware, isSlashCommand, type TranslationResult } from '@/lib/translationMiddleware';
 import { progressiveTranslationManager, TranslationPriority, type TranslationState } from '@/lib/progressiveTranslation';
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { tokenExtractor } from '@/lib/tokenExtractor';
+// import { tokenExtractor } from '@/lib/tokenExtractor'; // Removed - token counter no longer displayed
 
 interface ClaudeCodeSessionProps {
   /**
@@ -85,7 +84,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const [rawJsonlOutput, setRawJsonlOutput] = useState<string[]>([]);
   const [copyPopoverOpen, setCopyPopoverOpen] = useState(false);
   const [isFirstPrompt, setIsFirstPrompt] = useState(!session); // Key state for session continuation
-  const [totalTokens, setTotalTokens] = useState(0);
+  // const [totalTokens, setTotalTokens] = useState(0); // Removed token counter from header
   const [extractedSessionInfo, setExtractedSessionInfo] = useState<{ sessionId: string; projectId: string } | null>(null);
   const [claudeSessionId, setClaudeSessionId] = useState<string | null>(null);
   const [showTimeline, setShowTimeline] = useState(false);
@@ -355,25 +354,25 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     }
   }, [isLoading, displayableMessages.length, shouldAutoScroll, userScrolled]);
 
-  // Calculate total tokens from messages using enhanced token counter
-  useEffect(() => {
-    try {
-      if (messages.length > 0) {
-        const totalTokens = tokenExtractor.sessionTotal(messages);
-        setTotalTokens(totalTokens.total_tokens);
-        console.log('[ClaudeCodeSession] 📊 Enhanced token calculation:', {
-          messages: messages.length,
-          totalTokens: totalTokens.total_tokens,
-          efficiency: totalTokens.cache_read_tokens > 0 ? `${((totalTokens.cache_read_tokens / totalTokens.total_tokens) * 100).toFixed(1)}% cached` : 'no cache'
-        });
-      } else {
-        setTotalTokens(0);
-      }
-    } catch (err) {
-      console.error('[ClaudeCodeSession] Error in enhanced token calculation:', err);
-      setTotalTokens(0);
-    }
-  }, [messages]);
+  // Token calculation removed - no longer displayed in header
+  // useEffect(() => {
+  //   try {
+  //     if (messages.length > 0) {
+  //       const totalTokens = tokenExtractor.sessionTotal(messages);
+  //       setTotalTokens(totalTokens.total_tokens);
+  //       console.log('[ClaudeCodeSession] 📊 Enhanced token calculation:', {
+  //         messages: messages.length,
+  //         totalTokens: totalTokens.total_tokens,
+  //         efficiency: totalTokens.cache_read_tokens > 0 ? `${((totalTokens.cache_read_tokens / totalTokens.total_tokens) * 100).toFixed(1)}% cached` : 'no cache'
+  //       });
+  //     } else {
+  //       setTotalTokens(0);
+  //     }
+  //   } catch (err) {
+  //     console.error('[ClaudeCodeSession] Error in enhanced token calculation:', err);
+  //     setTotalTokens(0);
+  //   }
+  // }, [messages]);
 
   const loadSessionHistory = async () => {
     if (!session) return;
@@ -1985,15 +1984,6 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               <div className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-md text-xs text-blue-600">
                 <div className="rotating-symbol text-blue-600" style={{ width: '12px', height: '12px' }} />
                 <span>处理中...</span>
-              </div>
-            )}
-            
-            {/* Token Counter in Toolbar */}
-            {totalTokens > 0 && (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-muted/50 rounded-md border text-xs text-muted-foreground">
-                <Hash className="h-3 w-3" />
-                <span className="font-mono font-medium">{totalTokens.toLocaleString()}</span>
-                <span>tokens</span>
               </div>
             )}
             
