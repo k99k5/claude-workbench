@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   CheckCircle, 
@@ -22,6 +22,8 @@ import {
 } from "@/components/ui/popover";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { tokenExtractor } from "@/lib/tokenExtractor";
+import type { ClaudeStreamMessage } from "@/components/AgentExecution";
 import { useTranslation } from "@/hooks/useTranslation";
 
 // Global state to prevent multiple simultaneous checks
@@ -77,6 +79,8 @@ const saveCachedStatus = (statusInfo: StatusInfo) => {
 interface ClaudeStatusIndicatorProps {
   className?: string;
   onSettingsClick?: () => void;
+  messages?: ClaudeStreamMessage[];
+  sessionId?: string;
 }
 
 type ConnectionStatus = 'checking' | 'connected' | 'disconnected' | 'error';
@@ -90,13 +94,53 @@ interface StatusInfo {
 
 export const ClaudeStatusIndicator: React.FC<ClaudeStatusIndicatorProps> = ({
   className,
-  onSettingsClick
+  onSettingsClick,
+  messages = []
 }) => {
   const { t } = useTranslation();
   const [statusInfo, setStatusInfo] = useState<StatusInfo>({
     status: 'checking'
   });
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Calculate cost from messages
+  const sessionCost = useMemo(() => {
+    if (messages.length === 0) return 0;
+
+    let totalCost = 0;
+    const relevantMessages = messages.filter(m => m.type === 'assistant' || m.type === 'user');
+
+    relevantMessages.forEach(message => {
+      const tokens = tokenExtractor.extract(message);
+      // const model = (message as any).model || 'claude-3-5-sonnet-20241022';
+
+      // Simple cost calculation (per 1M tokens)
+      const pricing = {
+        input: 3.00,
+        output: 15.00,
+        cache_write: 3.75,
+        cache_read: 0.30
+      };
+
+      const inputCost = (tokens.input_tokens / 1_000_000) * pricing.input;
+      const outputCost = (tokens.output_tokens / 1_000_000) * pricing.output;
+      const cacheWriteCost = (tokens.cache_creation_tokens / 1_000_000) * pricing.cache_write;
+      const cacheReadCost = (tokens.cache_read_tokens / 1_000_000) * pricing.cache_read;
+
+      totalCost += inputCost + outputCost + cacheWriteCost + cacheReadCost;
+    });
+
+    return totalCost;
+  }, [messages.length]);
+
+  // Format cost display
+  const formatCost = (amount: number): string => {
+    if (amount === 0) return '';
+    if (amount < 0.01) {
+      return `$${(amount * 100).toFixed(3)}¢`;
+    }
+    return `$${amount.toFixed(4)}`;
+  };
 
   useEffect(() => {
     // Try to use cached status first - this is the primary mechanism
@@ -252,6 +296,11 @@ export const ClaudeStatusIndicator: React.FC<ClaudeStatusIndicatorProps> = ({
                 {statusInfo.version && (
                   <Badge variant="secondary" className={cn("text-xs", getStatusColor())}>
                     v{statusInfo.version}
+                  </Badge>
+                )}
+                {sessionCost > 0 && (
+                  <Badge variant="outline" className="text-xs ml-1 font-mono">
+                    {formatCost(sessionCost)}
                   </Badge>
                 )}
               </motion.div>

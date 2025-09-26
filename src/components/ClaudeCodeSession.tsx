@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft,
-  Terminal,
   FolderOpen,
   Copy,
   ChevronDown,
@@ -10,12 +9,19 @@ import {
   Settings,
   ChevronUp,
   X,
-  Command
+  Command,
+  DollarSign
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Popover } from "@/components/ui/popover";
+import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { api, type Session } from "@/lib/api";
 import { cn, normalizeUsageData } from "@/lib/utils";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -34,7 +40,7 @@ import type { ClaudeStreamMessage } from "./AgentExecution";
 import { translationMiddleware, isSlashCommand, type TranslationResult } from '@/lib/translationMiddleware';
 import { progressiveTranslationManager, TranslationPriority, type TranslationState } from '@/lib/progressiveTranslation';
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { RealtimeCostWidget } from "./RealtimeCostWidget";
+import { tokenExtractor } from '@/lib/tokenExtractor';
 
 interface ClaudeCodeSessionProps {
   /**
@@ -82,7 +88,6 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rawJsonlOutput, setRawJsonlOutput] = useState<string[]>([]);
-  const [copyPopoverOpen, setCopyPopoverOpen] = useState(false);
   const [isFirstPrompt, setIsFirstPrompt] = useState(!session); // Key state for session continuation
   // const [totalTokens, setTotalTokens] = useState(0); // Removed token counter from header
   const [extractedSessionInfo, setExtractedSessionInfo] = useState<{ sessionId: string; projectId: string } | null>(null);
@@ -94,9 +99,48 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const [showSlashCommandsSettings, setShowSlashCommandsSettings] = useState(false);
   const [forkCheckpointId, setForkCheckpointId] = useState<string | null>(null);
   const [forkSessionName, setForkSessionName] = useState("");
-  
+
   // Queued prompts state
   const [queuedPrompts, setQueuedPrompts] = useState<Array<{ id: string; prompt: string; model: "sonnet" | "opus" | "sonnet1m" }>>([]);
+
+  // Calculate session cost
+  const sessionCost = useMemo(() => {
+    if (messages.length === 0) return 0;
+
+    let totalCost = 0;
+    const relevantMessages = messages.filter(m => m.type === 'assistant' || m.type === 'user');
+
+    relevantMessages.forEach(message => {
+      const tokens = tokenExtractor.extract(message);
+      // const model = (message as any).model || 'claude-3-5-sonnet-20241022';
+
+      // Simple cost calculation (per 1M tokens)
+      const pricing = {
+        input: 3.00,
+        output: 15.00,
+        cache_write: 3.75,
+        cache_read: 0.30
+      };
+
+      const inputCost = (tokens.input_tokens / 1_000_000) * pricing.input;
+      const outputCost = (tokens.output_tokens / 1_000_000) * pricing.output;
+      const cacheWriteCost = (tokens.cache_creation_tokens / 1_000_000) * pricing.cache_write;
+      const cacheReadCost = (tokens.cache_read_tokens / 1_000_000) * pricing.cache_read;
+
+      totalCost += inputCost + outputCost + cacheWriteCost + cacheReadCost;
+    });
+
+    return totalCost;
+  }, [messages.length]);
+
+  // Format cost display
+  const formatCost = (amount: number): string => {
+    if (amount === 0) return '$0.00';
+    if (amount < 0.01) {
+      return `$${(amount * 100).toFixed(3)}¢`;
+    }
+    return `$${amount.toFixed(4)}`;
+  };
 
   // Progressive translation state
   const [translationStates, setTranslationStates] = useState<TranslationState>({});
@@ -1536,7 +1580,6 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const handleCopyAsJsonl = async () => {
     const jsonl = rawJsonlOutput.join('\n');
     await navigator.clipboard.writeText(jsonl);
-    setCopyPopoverOpen(false);
   };
 
   const handleCopyAsMarkdown = async () => {
@@ -1616,7 +1659,6 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     }
 
     await navigator.clipboard.writeText(markdown);
-    setCopyPopoverOpen(false);
   };
 
   const handleCheckpointSelect = async () => {
@@ -1957,28 +1999,48 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           transition={{ duration: 0.3 }}
           className="flex items-center justify-between p-4 border-b border-border"
         >
-          <div className="flex items-center space-x-3">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onBack}
-              className="h-9 px-3 border-border hover:bg-accent hover:text-accent-foreground transition-colors"
-            >
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              <span className="font-medium">返回会话列表</span>
-            </Button>
+          <div className="flex items-center">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={onBack}
+                    className="h-8 w-8 hover:bg-accent hover:text-accent-foreground mr-2"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>返回会话列表</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            <div className="h-5 w-px bg-border mr-3" />
             <div className="flex items-center gap-2">
-              <Terminal className="h-5 w-5 text-muted-foreground" />
-              <div className="flex-1">
-                <h1 className="text-xl font-bold">Claude 代码会话</h1>
-                <p className="text-sm text-muted-foreground">
-                  {projectPath ? `${projectPath}` : "未选择项目"}
-                </p>
-              </div>
+              <FolderOpen className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium text-foreground">
+                {projectPath || "未选择项目"}
+              </span>
             </div>
           </div>
-          
+
           <div className="flex items-center gap-2">
+            {/* Session Cost Display */}
+            {messages.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.2 }}
+              >
+                <Badge variant="outline" className="flex items-center gap-1 px-2 py-1 h-8">
+                  <DollarSign className="h-3 w-3 text-green-600" />
+                  <span className="font-mono text-xs">{formatCost(sessionCost)}</span>
+                </Badge>
+              </motion.div>
+            )}
+
             {/* Loading Indicator in Toolbar */}
             {isLoading && (
               <div className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-md text-xs text-blue-600">
@@ -1987,27 +2049,40 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               </div>
             )}
             
-            {projectPath && onProjectSettings && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onProjectSettings(projectPath)}
-                disabled={isLoading}
-              >
-                <Settings className="h-4 w-4 mr-2" />
-                Hooks
-              </Button>
-            )}
+            {/* 合并的项目配置按钮 */}
             {projectPath && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowSlashCommandsSettings(true)}
-                disabled={isLoading}
-              >
-                <Command className="h-4 w-4 mr-2" />
-                Commands
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={isLoading}
+                    className="h-8"
+                  >
+                    <Settings className="h-4 w-4 mr-2" />
+                    项目配置
+                    <ChevronDown className="h-3 w-3 ml-1" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-32">
+                  {onProjectSettings && (
+                    <DropdownMenuItem
+                      onClick={() => onProjectSettings(projectPath)}
+                      className="text-xs"
+                    >
+                      <Settings className="h-3 w-3 mr-2" />
+                      Hooks
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem
+                    onClick={() => setShowSlashCommandsSettings(true)}
+                    className="text-xs"
+                  >
+                    <Command className="h-3 w-3 mr-2" />
+                    Commands
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
             <div className="flex items-center gap-2">
               {showSettings && (
@@ -2017,78 +2092,68 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                   projectPath={projectPath}
                 />
               )}
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setShowSettings(!showSettings)}
-                      className="h-8 w-8"
-                    >
-                      <Settings className={cn("h-4 w-4", showSettings && "text-primary")} />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Checkpoint Settings</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              {/* 合并的检查点功能按钮 */}
               {effectiveSession && (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setShowTimeline(!showTimeline)}
-                        className="h-8 w-8"
-                      >
-                        <GitBranch className={cn("h-4 w-4", showTimeline && "text-primary")} />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Timeline Navigator</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8"
+                    >
+                      <GitBranch className="h-4 w-4 mr-2" />
+                      检查点
+                      <ChevronDown className="h-3 w-3 ml-1" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-32">
+                    <DropdownMenuItem
+                      onClick={() => setShowSettings(!showSettings)}
+                      className="text-xs"
+                    >
+                      <Settings className="h-3 w-3 mr-2" />
+                      {showSettings ? '隐藏设置' : '显示设置'}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setShowTimeline(!showTimeline)}
+                      className="text-xs"
+                    >
+                      <GitBranch className="h-3 w-3 mr-2" />
+                      {showTimeline ? '隐藏时间线' : '显示时间线'}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )}
               {messages.length > 0 && (
-                <Popover
-                  trigger={
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
                     <Button
                       variant="ghost"
                       size="sm"
                       className="flex items-center gap-2"
                     >
                       <Copy className="h-4 w-4" />
-                      Copy Output
+                      复制输出
                       <ChevronDown className="h-3 w-3" />
                     </Button>
-                  }
-                  content={
-                    <div className="w-44 p-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleCopyAsMarkdown}
-                        className="w-full justify-start"
-                      >
-                        Copy as Markdown
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleCopyAsJsonl}
-                        className="w-full justify-start"
-                      >
-                        Copy as JSONL
-                      </Button>
-                    </div>
-                  }
-                  open={copyPopoverOpen}
-                  onOpenChange={setCopyPopoverOpen}
-                />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-32">
+                    <DropdownMenuItem
+                      onClick={handleCopyAsMarkdown}
+                      className="text-xs"
+                    >
+                      <Copy className="h-3 w-3 mr-2" />
+                      Markdown
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={handleCopyAsJsonl}
+                      className="text-xs"
+                    >
+                      <Copy className="h-3 w-3 mr-2" />
+                      JSONL
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )}
             </div>
           </div>
@@ -2129,16 +2194,6 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               {projectPathInput}
               {messagesList}
 
-              {/* Realtime Cost Display */}
-              {messages.length > 0 && (
-                <RealtimeCostWidget
-                  messages={messages}
-                  sessionId={effectiveSession?.id}
-                  position="inline"
-                  className="mt-4 mb-2"
-                />
-              )}
-
               {isLoading && messages.length === 0 && (
                 <div className="flex items-center justify-center h-full">
                   <div className="flex items-center gap-3">
@@ -2153,16 +2208,6 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           )}
         </div>
 
-        {/* Realtime Cost Widget - Shows live cost tracking */}
-        {messages.length > 0 && (
-          <RealtimeCostWidget
-            messages={messages}
-            sessionId={effectiveSession?.id}
-            position="bottom-right"
-            showDetails={true}
-            defaultExpanded={false}
-          />
-        )}
 
         {/* Floating Prompt Input - Always visible */}
         <ErrorBoundary>

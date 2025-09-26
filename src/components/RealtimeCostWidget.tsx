@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DollarSign, TrendingUp, Hash, ChevronDown, ChevronUp } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -99,6 +99,7 @@ export const RealtimeCostWidget: React.FC<RealtimeCostWidgetProps> = ({
     efficiency: 0
   });
   const [todayTotal, setTodayTotal] = useState<number | null>(null);
+  const updateTimerRef = useRef<NodeJS.Timeout>();
 
   // Calculate cost from tokens and model
   const calculateCost = (tokens: any, model?: string) => {
@@ -117,60 +118,100 @@ export const RealtimeCostWidget: React.FC<RealtimeCostWidgetProps> = ({
     return inputCost + outputCost + cacheWriteCost + cacheReadCost;
   };
 
-  // Calculate stats from messages
-  useEffect(() => {
-    if (messages.length === 0) return;
+  // Memoize expensive calculations
+  const calculatedStats = useMemo(() => {
+    if (messages.length === 0) {
+      return {
+        stats: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheWriteTokens: 0,
+          cacheReadTokens: 0,
+          totalTokens: 0,
+          messageCount: 0,
+          efficiency: 0
+        },
+        cost: 0
+      };
+    }
 
     let inputTokens = 0;
     let outputTokens = 0;
     let cacheWriteTokens = 0;
     let cacheReadTokens = 0;
-    let totalCost = 0;
+    let totalCostCalc = 0;
     let messageCount = 0;
 
-    messages.forEach(message => {
-      if (message.type === 'assistant' || message.type === 'user') {
-        messageCount++;
+    // Process messages in batch for better performance
+    const relevantMessages = messages.filter(m => m.type === 'assistant' || m.type === 'user');
 
-        const tokens = tokenExtractor.extract(message);
-        inputTokens += tokens.input_tokens;
-        outputTokens += tokens.output_tokens;
-        cacheWriteTokens += tokens.cache_creation_tokens;
-        cacheReadTokens += tokens.cache_read_tokens;
+    relevantMessages.forEach(message => {
+      messageCount++;
 
-        // Get model from message
-        const model = (message as any).model || 'claude-3-5-sonnet-20241022';
-        const cost = calculateCost(tokens, model);
-        totalCost += cost;
-      }
+      // Lazy extraction - only when needed
+      const tokens = tokenExtractor.extract(message);
+      inputTokens += tokens.input_tokens;
+      outputTokens += tokens.output_tokens;
+      cacheWriteTokens += tokens.cache_creation_tokens;
+      cacheReadTokens += tokens.cache_read_tokens;
+
+      // Get model from message
+      const model = (message as any).model || 'claude-3-5-sonnet-20241022';
+      const cost = calculateCost(tokens, model);
+      totalCostCalc += cost;
     });
 
     const totalTokens = inputTokens + outputTokens + cacheWriteTokens + cacheReadTokens;
     const efficiency = totalTokens > 0 ? ((cacheReadTokens / totalTokens) * 100) : 0;
 
-    setSessionStats({
-      inputTokens,
-      outputTokens,
-      cacheWriteTokens,
-      cacheReadTokens,
-      totalTokens,
-      messageCount,
-      efficiency
-    });
-    setTotalCost(totalCost);
-  }, [messages]);
+    return {
+      stats: {
+        inputTokens,
+        outputTokens,
+        cacheWriteTokens,
+        cacheReadTokens,
+        totalTokens,
+        messageCount,
+        efficiency
+      },
+      cost: totalCostCalc
+    };
+  }, [messages.length]); // Only recalculate when message count changes, not on every update
 
-  // Load today's total on mount
+  // Update state with debounce to prevent rapid updates
   useEffect(() => {
-    const loadTodayTotal = async () => {
-      try {
-        const stats = await api.getTodayUsageStats();
-        setTodayTotal(stats.total_cost);
-      } catch (err) {
-        console.error('Failed to load today total:', err);
+    // Clear existing timer
+    if (updateTimerRef.current) {
+      clearTimeout(updateTimerRef.current);
+    }
+
+    // Set new timer for batch update
+    updateTimerRef.current = setTimeout(() => {
+      setSessionStats(calculatedStats.stats);
+      setTotalCost(calculatedStats.cost);
+    }, 100); // 100ms debounce
+
+    return () => {
+      if (updateTimerRef.current) {
+        clearTimeout(updateTimerRef.current);
       }
     };
-    loadTodayTotal();
+  }, [calculatedStats]);
+
+  // Load today's total on mount with debounce
+  useEffect(() => {
+    // Delay API call to avoid blocking initial render
+    const timer = setTimeout(() => {
+      api.getTodayUsageStats()
+        .then(stats => setTodayTotal(stats.total_cost))
+        .catch(err => {
+          console.error('Failed to load today total:', err);
+          // Don't block on error
+          setTodayTotal(0);
+        });
+    }, 500); // Delay by 500ms to let UI render first
+
+    return () => clearTimeout(timer);
   }, []);
 
   // Format currency
@@ -274,16 +315,17 @@ export const RealtimeCostWidget: React.FC<RealtimeCostWidgetProps> = ({
     );
   }
 
-  // Floating mode
+  // Floating mode with better positioning
   const positionClasses = {
-    'top-right': 'fixed top-20 right-4 z-40',
-    'bottom-right': 'fixed bottom-20 right-4 z-40'
+    'top-right': 'fixed top-24 right-6 z-30',  // Adjusted to avoid header
+    'bottom-right': 'fixed bottom-32 right-6 z-30'  // Moved up to avoid input area
   };
 
   return (
     <motion.div
-      initial={{ opacity: 0, scale: 0.9 }}
+      initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.2 }}
       className={cn(positionClasses[position as keyof typeof positionClasses], className)}
     >
       <Card className="shadow-lg border-border/50 backdrop-blur bg-background/95 w-64">

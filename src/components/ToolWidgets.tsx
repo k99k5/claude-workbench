@@ -695,15 +695,17 @@ export const GlobWidget: React.FC<{ pattern: string; result?: any }> = ({ patter
 /**
  * Widget for Bash tool
  */
-export const BashWidget: React.FC<{ 
-  command: string; 
+export const BashWidget: React.FC<{
+  command: string;
   description?: string;
   result?: any;
 }> = ({ command, description, result }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+
   // Extract result content if available
   let resultContent = '';
   let isError = false;
-  
+
   if (result) {
     isError = result.is_error || false;
     if (typeof result.content === 'string') {
@@ -720,7 +722,7 @@ export const BashWidget: React.FC<{
       }
     }
   }
-  
+
   return (
     <div className="rounded-lg border bg-zinc-950 overflow-hidden">
       <div className="px-4 py-2 bg-zinc-900/50 flex items-center gap-2 border-b">
@@ -739,6 +741,27 @@ export const BashWidget: React.FC<{
             <span>正在运行...</span>
           </div>
         )}
+        {/* Expand/Collapse button */}
+        {result && resultContent && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="ml-auto h-6 px-2"
+          >
+            {isExpanded ? (
+              <>
+                <ChevronUp className="h-3 w-3 mr-1" />
+                <span className="text-xs">收起</span>
+              </>
+            ) : (
+              <>
+                <ChevronDown className="h-3 w-3 mr-1" />
+                <span className="text-xs">展开</span>
+              </>
+            )}
+          </Button>
+        )}
       </div>
       <div className="p-4 space-y-3">
         <code className="text-xs font-mono text-green-400 block">
@@ -746,11 +769,11 @@ export const BashWidget: React.FC<{
         </code>
         
         {/* Show result if available */}
-        {result && (
+        {result && isExpanded && (
           <div className={cn(
             "mt-3 p-3 rounded-md border text-xs font-mono whitespace-pre-wrap overflow-x-auto",
-            isError 
-              ? "border-red-500/20 bg-red-500/5 text-red-400" 
+            isError
+              ? "border-red-500/20 bg-red-500/5 text-red-400"
               : "border-green-500/20 bg-green-500/5 text-green-300"
           )}>
             {resultContent || (isError ? "命令失败" : "命令完成")}
@@ -941,7 +964,7 @@ export const GrepWidget: React.FC<{
   exclude?: string;
   result?: any;
 }> = ({ pattern, include, path, exclude, result }) => {
-  const [isExpanded, setIsExpanded] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(false);
   
   // Extract result content if available
   let resultContent = '';
@@ -972,19 +995,66 @@ export const GrepWidget: React.FC<{
       lineNumber: number;
       content: string;
     }> = [];
-    
-    lines.forEach(line => {
-      // Common grep output format: filename:lineNumber:content
-      const match = line.match(/^(.+?):(\d+):(.*)$/);
-      if (match) {
-        results.push({
-          file: match[1],
-          lineNumber: parseInt(match[2], 10),
-          content: match[3]
-        });
-      }
-    });
-    
+
+    // Check if this is a "files_with_matches" mode (just file paths)
+    // or a detailed mode with line numbers and content
+    const isFilesOnlyMode = lines.length > 0 &&
+      lines.every(line => {
+        // Check if lines look like file paths (contain / or \ and likely have extensions)
+        return !line.includes(':') ||
+               (line.split(':').length === 2 && line.match(/\.[a-zA-Z]+$/));
+      });
+
+    if (isFilesOnlyMode) {
+      // Files only mode - each line is a file path
+      lines.forEach(line => {
+        const trimmedLine = line.trim();
+        if (trimmedLine) {
+          results.push({
+            file: trimmedLine,
+            lineNumber: 0,
+            content: '(文件包含匹配项)'
+          });
+        }
+      });
+    } else {
+      // Detailed mode - try to parse different formats
+      lines.forEach(line => {
+        const trimmedLine = line.trim();
+        if (!trimmedLine) return;
+
+        // Format 1: filename:lineNumber:content (standard grep -n output)
+        let match = trimmedLine.match(/^(.+?):(\d+):(.*)$/);
+
+        if (match) {
+          results.push({
+            file: match[1],
+            lineNumber: parseInt(match[2], 10),
+            content: match[3] || '(匹配行)'
+          });
+        } else {
+          // Format 2: Just file path (might be mixed in)
+          // Only treat as file path if it looks like one
+          if (trimmedLine.includes('/') || trimmedLine.includes('\\') || trimmedLine.includes('.')) {
+            results.push({
+              file: trimmedLine,
+              lineNumber: 0,
+              content: '(文件包含匹配项)'
+            });
+          }
+        }
+      });
+    }
+
+    // Debug logging
+    if (results.length === 0 && lines.length > 0) {
+      console.warn('[GrepWidget] No results parsed from grep output:', {
+        linesCount: lines.length,
+        firstLines: lines.slice(0, 3),
+        isFilesOnlyMode
+      });
+    }
+
     return results;
   };
   
@@ -1065,12 +1135,27 @@ export const GrepWidget: React.FC<{
       {result && (
         <div className="space-y-2">
           {isError ? (
-            <div className="flex items-center gap-3 p-4 rounded-lg bg-red-500/10 border border-red-500/20">
-              <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
-              <div className="text-sm text-red-600 dark:text-red-400">
-                {resultContent || "搜索失败"}
-              </div>
-            </div>
+            <>
+              <button
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="flex items-center gap-2 text-sm font-medium text-red-500 hover:text-red-600 transition-colors"
+              >
+                {isExpanded ? (
+                  <ChevronDown className="h-3.5 w-3.5" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5" />
+                )}
+                <span>搜索失败</span>
+              </button>
+              {isExpanded && (
+                <div className="flex items-center gap-3 p-4 rounded-lg bg-red-500/10 border border-red-500/20">
+                  <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
+                  <div className="text-sm text-red-600 dark:text-red-400">
+                    {resultContent || "搜索失败"}
+                  </div>
+                </div>
+              )}
+            </>
           ) : grepResults.length > 0 ? (
             <>
               <button
@@ -1084,17 +1169,17 @@ export const GrepWidget: React.FC<{
                 )}
                 <span>{grepResults.length} 个匹配项</span>
               </button>
-              
+
               {isExpanded && (
                 <div className="rounded-lg border bg-zinc-950 overflow-hidden">
                   <div className="max-h-[400px] overflow-y-auto">
                     {grepResults.map((match, idx) => {
                       const fileName = match.file.split('/').pop() || match.file;
                       const dirPath = match.file.substring(0, match.file.lastIndexOf('/'));
-                      
+
                       return (
-                        <div 
-                          key={idx} 
+                        <div
+                          key={idx}
                           className={cn(
                             "flex items-start gap-3 p-3 border-b border-zinc-800 hover:bg-zinc-900/50 transition-colors",
                             idx === grepResults.length - 1 && "border-b-0"
@@ -1102,11 +1187,17 @@ export const GrepWidget: React.FC<{
                         >
                           <div className="flex items-center gap-2 min-w-[60px]">
                             <FileText className="h-3.5 w-3.5 text-emerald-500" />
-                            <span className="text-xs font-mono text-emerald-400">
-                              {match.lineNumber}
-                            </span>
+                            {match.lineNumber > 0 ? (
+                              <span className="text-xs font-mono text-emerald-400">
+                                {match.lineNumber}
+                              </span>
+                            ) : (
+                              <span className="text-xs font-mono text-muted-foreground">
+                                文件
+                              </span>
+                            )}
                           </div>
-                          
+
                           <div className="flex-1 space-y-1 min-w-0">
                             <div className="flex items-center gap-2">
                               <span className="text-xs font-medium text-blue-400 truncate">
@@ -1118,9 +1209,11 @@ export const GrepWidget: React.FC<{
                                 </span>
                               )}
                             </div>
-                            <code className="text-xs font-mono text-zinc-300 block whitespace-pre-wrap break-all">
-                              {match.content.trim()}
-                            </code>
+                            {match.content && (
+                              <code className="text-xs font-mono text-zinc-300 block whitespace-pre-wrap break-all">
+                                {match.content.trim()}
+                              </code>
+                            )}
                           </div>
                         </div>
                       );
@@ -1130,13 +1223,113 @@ export const GrepWidget: React.FC<{
               )}
             </>
           ) : (
-            <div className="flex items-center gap-3 p-4 rounded-lg bg-amber-500/10 border border-amber-500/20">
-              <Info className="h-5 w-5 text-amber-500 flex-shrink-0" />
-              <div className="text-sm text-amber-600 dark:text-amber-400">
-                没有找到与给定模式匹配的结果。
-              </div>
-            </div>
+            <>
+              <button
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="flex items-center gap-2 text-sm font-medium text-amber-500 hover:text-amber-600 transition-colors"
+              >
+                {isExpanded ? (
+                  <ChevronDown className="h-3.5 w-3.5" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5" />
+                )}
+                <span>无匹配结果</span>
+              </button>
+              {isExpanded && (
+                <div className="flex items-center gap-3 p-4 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                  <Info className="h-5 w-5 text-amber-500 flex-shrink-0" />
+                  <div className="text-sm text-amber-600 dark:text-amber-400">
+                    没有找到与给定模式匹配的结果。
+                  </div>
+                </div>
+              )}
+            </>
           )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/**
+ * Widget for BashOutput tool
+ */
+export const BashOutputWidget: React.FC<{
+  bash_id: string;
+  result?: any;
+}> = ({ bash_id, result }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  // Extract result content if available
+  let resultContent = '';
+  let isError = false;
+
+  if (result) {
+    isError = result.is_error || false;
+    if (typeof result.content === 'string') {
+      resultContent = result.content;
+    } else if (result.content && typeof result.content === 'object') {
+      if (result.content.text) {
+        resultContent = result.content.text;
+      } else if (Array.isArray(result.content)) {
+        resultContent = result.content
+          .map((c: any) => (typeof c === 'string' ? c : c.text || JSON.stringify(c)))
+          .join('\n');
+      } else {
+        resultContent = JSON.stringify(result.content, null, 2);
+      }
+    }
+  }
+
+  // Function to strip ANSI escape sequences
+  const stripAnsiCodes = (text: string): string => {
+    // Remove ANSI color codes and other escape sequences
+    return text.replace(/\x1b\[[0-9;]*[mGKHJfABCD]/g, '');
+  };
+
+  const cleanContent = stripAnsiCodes(resultContent);
+
+  return (
+    <div className="rounded-lg border bg-zinc-950 overflow-hidden">
+      <div className="px-4 py-2 bg-zinc-900/50 flex items-center gap-2 border-b">
+        <Terminal className="h-3.5 w-3.5 text-blue-500" />
+        <span className="text-xs font-mono text-muted-foreground">Bash 输出</span>
+        <code className="text-xs font-mono text-blue-400">ID: {bash_id}</code>
+
+        {/* Expand/Collapse button */}
+        {result && cleanContent && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="ml-auto h-6 px-2"
+          >
+            {isExpanded ? (
+              <>
+                <ChevronUp className="h-3 w-3 mr-1" />
+                <span className="text-xs">收起</span>
+              </>
+            ) : (
+              <>
+                <ChevronDown className="h-3 w-3 mr-1" />
+                <span className="text-xs">展开</span>
+              </>
+            )}
+          </Button>
+        )}
+      </div>
+
+      {isExpanded && result && (
+        <div className="p-4 space-y-3">
+          {/* Show result if available */}
+          <div className={cn(
+            "p-3 rounded-md border text-xs font-mono whitespace-pre-wrap overflow-x-auto",
+            isError
+              ? "border-red-500/20 bg-red-500/5 text-red-400"
+              : "border-blue-500/20 bg-blue-500/5 text-blue-300"
+          )}>
+            {cleanContent || (isError ? "获取输出失败" : "输出为空")}
+          </div>
         </div>
       )}
     </div>
@@ -1194,6 +1387,7 @@ export const EditWidget: React.FC<{
   result?: any;
 }> = ({ file_path, old_string, new_string, result: _result }) => {
   const { theme } = useTheme();
+  const [isExpanded, setIsExpanded] = useState(false);
 
   const diffResult = Diff.diffLines(old_string || '', new_string || '', {
     newlineIsToken: true,
@@ -1204,15 +1398,38 @@ export const EditWidget: React.FC<{
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 mb-2">
-        <FileEdit className="h-4 w-4 text-primary" />
-        <span className="text-sm font-medium">应用编辑到：</span>
-        <code className="text-sm font-mono bg-background px-2 py-0.5 rounded flex-1 truncate">
-          {file_path}
-        </code>
+        <FileEdit className="h-4 w-4 text-muted-foreground" />
+        <span className="text-sm font-medium">使用工具： Edit</span>
       </div>
+      <div className="ml-6 space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 flex-1">
+            <FileText className="h-3 w-3 text-blue-500" />
+            <code className="text-xs font-mono text-blue-500 truncate">{file_path}</code>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="h-6 px-2"
+          >
+            {isExpanded ? (
+              <>
+                <ChevronUp className="h-3 w-3 mr-1" />
+                <span className="text-xs">收起</span>
+              </>
+            ) : (
+              <>
+                <ChevronDown className="h-3 w-3 mr-1" />
+                <span className="text-xs">展开</span>
+              </>
+            )}
+          </Button>
+        </div>
 
-      <div className="rounded-lg border bg-zinc-950 overflow-hidden text-xs font-mono">
-        <div className="max-h-[440px] overflow-y-auto overflow-x-auto">
+      {isExpanded && (
+        <div className="rounded-lg border bg-zinc-950 overflow-hidden text-xs font-mono mt-2">
+          <div className="max-h-[440px] overflow-y-auto overflow-x-auto">
           {diffResult.map((part, index) => {
             const partClass = part.added 
               ? 'bg-green-950/20' 
@@ -1259,7 +1476,9 @@ export const EditWidget: React.FC<{
               </div>
             );
           })}
+          </div>
         </div>
+      )}
       </div>
     </div>
   );

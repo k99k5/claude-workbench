@@ -4,6 +4,7 @@ import { FileText, Settings, BarChart3, Network } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ClaudeStatusIndicator } from "@/components/ClaudeStatusIndicator";
 import { cn } from "@/lib/utils";
+import type { ClaudeStreamMessage } from "@/components/AgentExecution";
 import { useTranslation } from "@/hooks/useTranslation";
 
 interface TopbarProps {
@@ -23,6 +24,14 @@ interface TopbarProps {
    * Callback when MCP is clicked
    */
   onMCPClick: () => void;
+  /**
+   * Optional messages for cost calculation
+   */
+  messages?: ClaudeStreamMessage[];
+  /**
+   * Optional session ID
+   */
+  sessionId?: string;
   /**
    * Optional className for styling
    */
@@ -45,14 +54,20 @@ export const Topbar: React.FC<TopbarProps> = ({
   onSettingsClick,
   onUsageClick,
   onMCPClick,
+  messages,
+  sessionId,
   className,
 }) => {
   const { t } = useTranslation();
   
   // Memoize the status indicator to prevent recreation on every render
   const statusIndicator = useMemo(
-    () => <ClaudeStatusIndicator onSettingsClick={onSettingsClick} />,
-    [onSettingsClick]
+    () => <ClaudeStatusIndicator
+      onSettingsClick={onSettingsClick}
+      messages={messages}
+      sessionId={sessionId}
+    />,
+    [onSettingsClick, messages, sessionId]
   );
   
   return (
