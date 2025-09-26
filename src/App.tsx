@@ -82,7 +82,7 @@ function App() {
     const handleSessionSelected = (event: CustomEvent) => {
       const { session } = event.detail;
       setSelectedSession(session);
-      handleViewChange("claude-code-session");
+      handleViewChange("claude-tab-manager");
     };
 
     const handleClaudeNotFound = () => {
@@ -386,6 +386,10 @@ function App() {
                         projectPath={selectedProject.path}
                         onBack={handleBack}
                         onEditClaudeFile={handleEditClaudeFile}
+                        onSessionClick={(session) => {
+                          setSelectedSession(session);
+                          handleViewChange("claude-tab-manager");
+                        }}
                         onNewSession={(projectPath) => {
                           setSelectedSession(null); // Clear any existing session
                           setNewSessionProjectPath(projectPath); // Store the project path for new session
@@ -419,7 +423,12 @@ function App() {
                       </motion.div>
 
                       {/* Running Claude Sessions */}
-                      <RunningClaudeSessions />
+                      <RunningClaudeSessions
+                        onSessionClick={(session) => {
+                          setSelectedSession(session);
+                          handleViewChange("claude-tab-manager");
+                        }}
+                      />
 
                       {/* Project list */}
                       {projects.length > 0 ? (
