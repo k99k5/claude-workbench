@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { 
-  Plus, 
-  Edit, 
-  Trash2, 
+import {
+  Plus,
+  Edit,
+  Trash2,
   Play,
   Bot,
   ArrowLeft,
@@ -12,7 +12,10 @@ import {
   Upload,
   Globe,
   FileJson,
-  ChevronDown
+  ChevronDown,
+  Settings,
+  Users,
+  Zap
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
@@ -51,6 +54,10 @@ interface CCAgentsProps {
    * Optional className for styling
    */
   className?: string;
+  /**
+   * Navigation callback for routing to different views
+   */
+  onNavigate?: (view: string) => void;
 }
 
 // Available icons for agents - now using all icons from IconPicker
@@ -64,7 +71,7 @@ export type AgentIconName = keyof typeof AGENT_ICONS;
  * @example
  * <CCAgents onBack={() => setView('home')} />
  */
-export const CCAgents: React.FC<CCAgentsProps> = ({ onBack, className }) => {
+export const CCAgents: React.FC<CCAgentsProps> = ({ onBack, className, onNavigate }) => {
   // const { t } = useTranslation(); // TODO: Add translations
   const [agents, setAgents] = useState<Agent[]>([]);
   const [runs, setRuns] = useState<AgentRunWithMetrics[]>([]);
@@ -317,6 +324,31 @@ export const CCAgents: React.FC<CCAgentsProps> = ({ onBack, className }) => {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              {/* Advanced Management */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    size="default"
+                    variant="outline"
+                    className="flex items-center gap-2"
+                  >
+                    <Settings className="h-4 w-4" />
+                    管理
+                    <ChevronDown className="h-3 w-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => onNavigate?.('subagent-manager')}>
+                    <Users className="h-4 w-4 mr-2" />
+                    Subagent专业化
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onNavigate?.('enhanced-hooks-manager')}>
+                    <Zap className="h-4 w-4 mr-2" />
+                    增强型Hooks
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button

@@ -2623,4 +2623,176 @@ export const api = {
     }
   },
 
+  // Subagent Management & Specialization API methods
+
+  /**
+   * Initializes the subagent specialization system
+   * @returns Promise resolving to success message
+   */
+  async initSubagentSystem(): Promise<string> {
+    try {
+      return await invoke<string>("init_subagent_system");
+    } catch (error) {
+      console.error("Failed to initialize subagent system:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Lists all available subagent specialties
+   * @returns Promise resolving to array of subagent specialties
+   */
+  async listSubagentSpecialties(): Promise<any[]> {
+    try {
+      return await invoke<any[]>("list_subagent_specialties");
+    } catch (error) {
+      console.error("Failed to list subagent specialties:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Intelligent routing - selects most suitable subagent for user request
+   * @param userRequest - The user's request to route
+   * @returns Promise resolving to routing decision
+   */
+  async routeToSubagent(userRequest: string): Promise<any> {
+    try {
+      return await invoke<any>("route_to_subagent", { userRequest });
+    } catch (error) {
+      console.error("Failed to route to subagent:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Updates subagent specialty configuration
+   * @param agentId - The agent ID to update
+   * @param specialty - The specialty type
+   * @param specialtyConfig - Optional JSON configuration
+   * @param routingKeywords - Optional JSON array of routing keywords
+   * @param autoInvoke - Whether to auto-invoke this subagent
+   * @returns Promise resolving when update is complete
+   */
+  async updateSubagentSpecialty(
+    agentId: number,
+    specialty: string,
+    specialtyConfig?: string,
+    routingKeywords?: string,
+    autoInvoke?: boolean
+  ): Promise<void> {
+    try {
+      return await invoke<void>("update_subagent_specialty", {
+        agentId,
+        specialty,
+        specialtyConfig,
+        routingKeywords,
+        autoInvoke
+      });
+    } catch (error) {
+      console.error("Failed to update subagent specialty:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Gets subagent routing history
+   * @param limit - Optional limit for number of entries
+   * @returns Promise resolving to array of routing history entries
+   */
+  async getRoutingHistory(limit?: number): Promise<any[]> {
+    try {
+      return await invoke<any[]>("get_routing_history", { limit });
+    } catch (error) {
+      console.error("Failed to get routing history:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Provides feedback on routing decision for ML improvement
+   * @param logId - The routing log ID
+   * @param feedback - Feedback score (1: good, 0: neutral, -1: bad)
+   * @returns Promise resolving when feedback is recorded
+   */
+  async provideRoutingFeedback(logId: number, feedback: number): Promise<void> {
+    try {
+      return await invoke<void>("provide_routing_feedback", { logId, feedback });
+    } catch (error) {
+      console.error("Failed to provide routing feedback:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Executes professional code review using specialized code-reviewer agent
+   * @param filePaths - Array of file paths to review
+   * @param reviewScope - Optional scope: "security", "performance", "all" (default)
+   * @returns Promise resolving to detailed code review results
+   */
+  async executeCodeReview(filePaths: string[], reviewScope?: string): Promise<import('@/types/subagents').CodeReviewResult> {
+    try {
+      return await invoke<import('@/types/subagents').CodeReviewResult>("execute_code_review", {
+        filePaths,
+        reviewScope
+      });
+    } catch (error) {
+      console.error("Failed to execute code review:", error);
+      throw error;
+    }
+  },
+
+  // Enhanced Hooks Automation API methods
+
+  /**
+   * Triggers a hook event with context
+   * @param event - The hook event name
+   * @param context - The hook execution context
+   * @returns Promise resolving to hook chain execution result
+   */
+  async triggerHookEvent(event: string, context: any): Promise<any> {
+    try {
+      return await invoke<any>("trigger_hook_event", { event, context });
+    } catch (error) {
+      console.error("Failed to trigger hook event:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Tests a hook condition expression
+   * @param condition - The condition expression to test
+   * @param context - The hook context for evaluation
+   * @returns Promise resolving to whether condition is true
+   */
+  async testHookCondition(condition: string, context: any): Promise<boolean> {
+    try {
+      return await invoke<boolean>("test_hook_condition", { condition, context });
+    } catch (error) {
+      console.error("Failed to test hook condition:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Executes pre-commit code review hook with intelligent decision making
+   * @param projectPath - The project path to review
+   * @param config - Optional configuration for the review hook
+   * @returns Promise resolving to commit decision
+   */
+  async executePreCommitReview(
+    projectPath: string,
+    config?: import('@/types/enhanced-hooks').PreCommitCodeReviewConfig
+  ): Promise<import('@/types/enhanced-hooks').CommitDecision> {
+    try {
+      return await invoke<import('@/types/enhanced-hooks').CommitDecision>("execute_pre_commit_review", {
+        projectPath,
+        config
+      });
+    } catch (error) {
+      console.error("Failed to execute pre-commit review:", error);
+      throw error;
+    }
+  },
+
 };

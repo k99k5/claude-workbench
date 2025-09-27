@@ -62,6 +62,14 @@ use commands::translator::{
     clear_translation_cache, get_translation_cache_stats, detect_text_language,
     init_translation_service_command,
 };
+use commands::subagents::{
+    init_subagent_system, list_subagent_specialties, route_to_subagent,
+    update_subagent_specialty, get_routing_history, provide_routing_feedback,
+    execute_code_review,
+};
+use commands::enhanced_hooks::{
+    trigger_hook_event, test_hook_condition, execute_pre_commit_review,
+};
 use process::ProcessRegistryState;
 use std::sync::Mutex;
 use tauri::Manager;
@@ -211,7 +219,21 @@ fn main() {
             fetch_github_agents,
             fetch_github_agent_content,
             import_agent_from_github,
-            
+
+            // Subagent Management & Specialization
+            init_subagent_system,
+            list_subagent_specialties,
+            route_to_subagent,
+            update_subagent_specialty,
+            get_routing_history,
+            provide_routing_feedback,
+            execute_code_review,
+
+            // Enhanced Hooks Automation
+            trigger_hook_event,
+            test_hook_condition,
+            execute_pre_commit_review,
+
             // Usage & Analytics
             get_usage_stats,
             get_usage_overview,

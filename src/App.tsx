@@ -23,6 +23,8 @@ import { ClaudeBinaryDialog } from "@/components/ClaudeBinaryDialog";
 import { Toast, ToastContainer } from "@/components/ui/toast";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ProjectSettings } from '@/components/ProjectSettings';
+import { SubagentManager } from '@/components/SubagentManager';
+import { EnhancedHooksManager } from '@/components/EnhancedHooksManager';
 import { useTranslation } from '@/hooks/useTranslation';
 
 type View =
@@ -40,7 +42,9 @@ type View =
   | "agent-run-view"
   | "mcp"
   | "usage-dashboard"
-  | "project-settings";
+  | "project-settings"
+  | "subagent-manager"
+  | "enhanced-hooks-manager";
 
 /**
  * 主应用组件 - 管理 Claude 目录浏览器界面
@@ -331,8 +335,24 @@ function AppContent() {
 
       case "cc-agents":
         return (
-          <CCAgents 
-            onBack={() => handleViewChange("welcome")} 
+          <CCAgents
+            onBack={() => handleViewChange("welcome")}
+            onNavigate={(view) => handleViewChange(view as View)}
+          />
+        );
+
+      case "subagent-manager":
+        return (
+          <SubagentManager
+            onBack={() => handleViewChange("cc-agents")}
+          />
+        );
+
+      case "enhanced-hooks-manager":
+        return (
+          <EnhancedHooksManager
+            onBack={() => handleViewChange("cc-agents")}
+            projectPath={projectForSettings?.path}
           />
         );
 

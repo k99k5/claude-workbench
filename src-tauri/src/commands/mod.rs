@@ -10,3 +10,5 @@ pub mod permission_config;
 pub mod translator;
 pub mod context_manager;
 pub mod context_commands;
+pub mod subagents;
+pub mod enhanced_hooks;

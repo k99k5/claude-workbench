@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>实时成本显示测试</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .feature-list {
+            list-style: none;
+            padding: 0;
+        }
+        .feature-list li {
+            padding: 10px;
+            margin: 10px 0;
+            background: #f9f9f9;
+            border-left: 4px solid #4CAF50;
+            border-radius: 4px;
+        }
+        .check {
+            color: #4CAF50;
+            font-weight: bold;
+        }
+        .cost-display {
+            background: #e8f5e9;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        .cost-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2e7d32;
+        }
+        .token-details {
+            margin-top: 10px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>🎉 实时成本显示功能测试</h1>
+
+        <h2>✅ 已完成的功能：</h2>
+        <ul class="feature-list">
+            <li><span class="check">✓</span> Token提取逻辑修复 - 支持JSONL格式的cache_creation对象</li>
+            <li><span class="check">✓</span> UI文本本地化 - Token显示已改为中文（提示/补全/缓存创建/缓存）</li>
+            <li><span class="check">✓</span> 移除会话页面头部的token统计</li>
+            <li><span class="check">✓</span> 创建RealtimeCostWidget组件</li>
+            <li><span class="check">✓</span> 集成实时成本显示到ClaudeCodeSession</li>
+        </ul>
+
+        <div class="cost-display">
+            <h3>实时成本显示示例：</h3>
+            <div class="cost-value">$0.0234</div>
+            <div class="token-details">
+                Tokens: 7,234 提示, 3,456 补全, 834 缓存创建, 82,322 缓存
+            </div>
+        </div>
+
+        <h2>📊 功能特性：</h2>
+        <ul class="feature-list">
+            <li>实时计算每条消息的成本</li>
+            <li>支持多种Claude模型定价（Opus/Sonnet/Haiku）</li>
+            <li>显示token使用详情（输入/输出/缓存读写）</li>
+            <li>计算缓存效率百分比</li>
+            <li>展示今日总成本</li>
+            <li>支持折叠/展开详细信息</li>
+            <li>支持内联和浮动两种显示模式</li>
+        </ul>
+
+        <h2>🚀 使用方式：</h2>
+        <p>组件会自动在会话中显示，实时跟踪token使用情况和成本。当有新消息时，成本会实时更新。</p>
+    </div>
+</body>
+</html>
