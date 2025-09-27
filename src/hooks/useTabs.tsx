@@ -28,7 +28,7 @@ interface TabContextValue {
   updateTabTitle: (tabId: string, title: string) => void;
   getTabById: (tabId: string) => TabSession | undefined;
   getActiveTab: () => TabSession | undefined;
-  openSessionInBackground: (session: Session) => string;
+  openSessionInBackground: (session: Session) => { tabId: string; isNew: boolean };
   getTabStats: () => { total: number; active: number; hasChanges: number };
 }
 
@@ -196,9 +196,17 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
   }, [tabs]);
 
   // 后台打开会话（不激活）
-  const openSessionInBackground = useCallback((session: Session): string => {
-    return createNewTab(session, undefined, false);
-  }, [createNewTab]);
+  const openSessionInBackground = useCallback((session: Session): { tabId: string; isNew: boolean } => {
+    // 检查是否已经存在相同会话ID的标签页
+    const existingTab = tabs.find(tab => tab.session?.id === session.id);
+    if (existingTab) {
+      console.log(`[useTabs] Session ${session.id} already exists in tab ${existingTab.id}, skipping creation`);
+      return { tabId: existingTab.id, isNew: false };
+    }
+
+    const newTabId = createNewTab(session, undefined, false);
+    return { tabId: newTabId, isNew: true };
+  }, [tabs, createNewTab]);
 
   // 获取标签页统计信息
   const getTabStats = useCallback(() => {

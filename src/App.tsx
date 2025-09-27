@@ -95,12 +95,19 @@ function AppContent() {
     const handleSessionSelected = (event: CustomEvent) => {
       const { session } = event.detail;
       // 在后台打开会话，不跳转页面
-      openSessionInBackground(session);
-      // 可选：显示一个通知告诉用户会话已在后台打开
-      setToast({
-        message: `会话 ${session.id.slice(-8)} 已在后台打开`,
-        type: "info"
-      });
+      const result = openSessionInBackground(session);
+      // 根据是否创建新标签页显示不同的通知
+      if (result.isNew) {
+        setToast({
+          message: `会话 ${session.id.slice(-8)} 已在后台打开`,
+          type: "info"
+        });
+      } else {
+        setToast({
+          message: `会话 ${session.id.slice(-8)} 已存在`,
+          type: "info"
+        });
+      }
     };
 
     const handleClaudeNotFound = () => {
@@ -406,11 +413,18 @@ function AppContent() {
                         onEditClaudeFile={handleEditClaudeFile}
                         onSessionClick={(session) => {
                           // 在后台打开会话，不跳转页面
-                          openSessionInBackground(session);
-                          setToast({
-                            message: `会话 ${session.id.slice(-8)} 已在后台打开`,
-                            type: "info"
-                          });
+                          const result = openSessionInBackground(session);
+                          if (result.isNew) {
+                            setToast({
+                              message: `会话 ${session.id.slice(-8)} 已在后台打开`,
+                              type: "info"
+                            });
+                          } else {
+                            setToast({
+                              message: `会话 ${session.id.slice(-8)} 已存在`,
+                              type: "info"
+                            });
+                          }
                         }}
                         onNewSession={(projectPath) => {
                           setSelectedSession(null); // Clear any existing session
@@ -448,11 +462,18 @@ function AppContent() {
                       <RunningClaudeSessions
                         onSessionClick={(session) => {
                           // 在后台打开会话，不跳转页面
-                          openSessionInBackground(session);
-                          setToast({
-                            message: `会话 ${session.id.slice(-8)} 已在后台打开`,
-                            type: "info"
-                          });
+                          const result = openSessionInBackground(session);
+                          if (result.isNew) {
+                            setToast({
+                              message: `会话 ${session.id.slice(-8)} 已在后台打开`,
+                              type: "info"
+                            });
+                          } else {
+                            setToast({
+                              message: `会话 ${session.id.slice(-8)} 已存在`,
+                              type: "info"
+                            });
+                          }
                         }}
                       />
 

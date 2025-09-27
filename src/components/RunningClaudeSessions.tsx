@@ -62,13 +62,7 @@ export const RunningClaudeSessions: React.FC<RunningClaudeSessionsProps> = ({
         project_path: processInfo.project_path,
         created_at: new Date(processInfo.started_at).getTime() / 1000,
       };
-      
-      // Emit event to navigate to the session
-      const event = new CustomEvent('claude-session-selected', { 
-        detail: { session, projectPath: processInfo.project_path } 
-      });
-      window.dispatchEvent(event);
-      
+
       onSessionClick?.(session);
     }
   };
