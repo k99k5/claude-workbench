@@ -1327,15 +1327,18 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
         setClaudeSessionId(effectiveSession.id);
       }
 
-      // Only clean up and set up new listeners if not already listening
-      if (!isListeningRef.current) {
+      // 🔧 CRITICAL FIX: Only set up listeners if this tab is active
+      // This prevents multiple ClaudeCodeSession instances from processing the same events
+      if (!isListeningRef.current && isActive) {
         // Clean up previous listeners
         unlistenRefs.current.forEach(unlisten => unlisten && typeof unlisten === 'function' && unlisten());
         unlistenRefs.current = [];
-        
+
         // Mark as setting up listeners
         isListeningRef.current = true;
-        
+
+        console.log('[ClaudeCodeSession] Setting up event listeners for ACTIVE tab only');
+
         // --------------------------------------------------------------------
         // 1️⃣  Event Listener Setup Strategy
         // --------------------------------------------------------------------
@@ -1348,8 +1351,6 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
         //     dynamically switch to session-scoped listeners and stop the
         //     generic ones to prevent duplicate handling.
         // --------------------------------------------------------------------
-
-        console.log('[ClaudeCodeSession] Setting up generic event listeners first');
 
         let currentSessionId: string | null = claudeSessionId || effectiveSession?.id || null;
 
