@@ -253,13 +253,34 @@ export const TabManager: React.FC<TabManagerProps> = ({
             );
           })}
 
-          {/* 无标签页时的占位符 */}
+          {/* 🔧 IMPROVED: 无标签页时的增强占位符 */}
           {tabs.length === 0 && (
             <div className="flex items-center justify-center h-full text-muted-foreground">
-              <div className="text-center">
+              <div className="text-center space-y-4">
                 <MessageSquare className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p className="text-lg font-medium mb-2">暂无会话</p>
-                <p className="text-sm">点击"+"按钮创建新的 Claude 会话</p>
+                <div>
+                  <p className="text-lg font-medium mb-2">暂无活跃会话</p>
+                  <p className="text-sm mb-6">所有标签页已关闭</p>
+                </div>
+
+                {/* 🔧 NEW: Explicit actions for creating new sessions */}
+                <div className="space-y-2">
+                  <Button
+                    onClick={() => createNewTab()}
+                    className="w-full"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    创建新会话
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={onBack}
+                    className="w-full"
+                  >
+                    <ArrowLeft className="h-4 w-4 mr-2" />
+                    返回主界面
+                  </Button>
+                </div>
               </div>
             </div>
           )}
