@@ -221,6 +221,15 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
     };
   }, [tabs]);
 
+  // 🔧 NEW: Register cleanup callback for a tab
+  const registerTabCleanup = useCallback((tabId: string, cleanup: () => Promise<void> | void) => {
+    setTabs(prevTabs =>
+      prevTabs.map(tab =>
+        tab.id === tabId ? { ...tab, cleanup } : tab
+      )
+    );
+  }, []);
+
   const contextValue: TabContextValue = {
     tabs,
     activeTabId,
