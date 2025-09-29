@@ -145,6 +145,8 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   // Progressive translation state
   const [translationStates, setTranslationStates] = useState<TranslationState>({});
   const [translationEnabled, setTranslationEnabled] = useState<boolean>(false);
+  // Settings state to avoid repeated loading in StreamMessage components
+  const [claudeSettings, setClaudeSettings] = useState<{ showSystemInitialization?: boolean }>({});
 
   // Debug logging for translation states - TODO: Use in UI components
   React.useEffect(() => {
