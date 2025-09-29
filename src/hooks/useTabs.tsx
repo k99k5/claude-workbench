@@ -87,28 +87,18 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
   // 创建新标签页
   const createNewTab = useCallback((session?: Session, projectPath?: string, activate: boolean = true): string => {
     const newTabId = generateTabId();
-    const newTab: TabSession = {
+    const newTabData: TabSessionData = {
       id: newTabId,
       title: generateTabTitle(session, projectPath),
       projectPath: projectPath || session?.project_path,
       session,
-      isActive: false, // 先设为不活跃，稍后根据 activate 参数决定
       isLoading: false,
       hasChanges: false,
       createdAt: Date.now(),
       lastActivityAt: Date.now(),
     };
 
-    setTabs(prevTabs => {
-      if (activate) {
-        // 如果要激活新标签页，将所有现有标签页设为非活跃状态
-        const updatedTabs = prevTabs.map(tab => ({ ...tab, isActive: false }));
-        return [...updatedTabs, { ...newTab, isActive: true }];
-      } else {
-        // 后台打开，保持当前活跃标签页不变
-        return [...prevTabs, newTab];
-      }
-    });
+    setTabsData(prevTabsData => [...prevTabsData, newTabData]);
 
     if (activate) {
       setActiveTabId(newTabId);
