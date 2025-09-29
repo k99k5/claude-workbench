@@ -84,3 +84,15 @@ const TabSessionWrapperComponent: React.FC<TabSessionWrapperProps> = ({
     </div>
   );
 };
+
+// 使用React.memo优化，避免不必要的重新渲染
+export const TabSessionWrapper = React.memo(TabSessionWrapperComponent, (prevProps, nextProps) => {
+  // 自定义比较函数，只有这些props变化时才重新渲染
+  return (
+    prevProps.tabId === nextProps.tabId &&
+    prevProps.isActive === nextProps.isActive &&
+    prevProps.session?.id === nextProps.session?.id &&
+    prevProps.initialProjectPath === nextProps.initialProjectPath
+    // onBack, onProjectSettings, onStreamingChange 等函数props通常是稳定的
+  );
+});
