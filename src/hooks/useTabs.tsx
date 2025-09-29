@@ -122,7 +122,7 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
   // 关闭标签页
   const closeTab = useCallback(async (tabId: string, force = false) => {
     // 🔧 CRITICAL FIX: Call cleanup before removing tab
-    const tab = tabs.find(t => t.id === tabId);
+    const tab = tabsData.find(t => t.id === tabId);
 
     // 如果标签页有未保存的更改且不是强制关闭，显示确认对话框
     if (!force && tab?.hasChanges) {
@@ -142,32 +142,23 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
       }
     }
 
-    setTabs(prevTabs => {
-      const remainingTabs = prevTabs.filter(t => t.id !== tabId);
+    setTabsData(prevTabsData => {
+      const remainingTabsData = prevTabsData.filter(t => t.id !== tabId);
 
       // 如果关闭的是当前活跃标签页，需要激活另一个标签页
-      if (activeTabId === tabId && remainingTabs.length > 0) {
-        const lastActiveTab = remainingTabs.reduce((latest, current) =>
+      if (activeTabId === tabId && remainingTabsData.length > 0) {
+        const lastActiveTab = remainingTabsData.reduce((latest, current) =>
           current.lastActivityAt > latest.lastActivityAt ? current : latest
         );
 
-        // 激活最近使用的标签页
-        const updatedTabs = remainingTabs.map(tab => ({
-          ...tab,
-          isActive: tab.id === lastActiveTab.id,
-        }));
-
         setActiveTabId(lastActiveTab.id);
-        return updatedTabs;
-      }
-
-      if (remainingTabs.length === 0) {
+      } else if (remainingTabsData.length === 0) {
         setActiveTabId(null);
       }
 
-      return remainingTabs;
+      return remainingTabsData;
     });
-  }, [activeTabId, tabs]);
+  }, [activeTabId, tabsData]);
 
   // 更新标签页流状态
   const updateTabStreamingStatus = useCallback((tabId: string, isStreaming: boolean, sessionId: string | null) => {
