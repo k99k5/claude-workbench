@@ -15,6 +15,8 @@ export interface TabSession {
   };
   createdAt: number;
   lastActivityAt: number;
+  // 🔧 NEW: Resource cleanup callback
+  cleanup?: () => Promise<void> | void;
 }
 
 interface TabContextValue {
