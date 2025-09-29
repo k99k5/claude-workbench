@@ -793,7 +793,7 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
                         style={{ top: virtualItem.start }}
                       >
                         <ErrorBoundary>
-                          <StreamMessage message={message} streamMessages={messages} />
+                          <StreamMessage message={message} streamMessages={messages} claudeSettings={claudeSettings} />
                         </ErrorBoundary>
                       </motion.div>
                     );
@@ -935,7 +935,7 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
                         style={{ top: virtualItem.start }}
                       >
                         <ErrorBoundary>
-                          <StreamMessage message={message} streamMessages={messages} />
+                          <StreamMessage message={message} streamMessages={messages} claudeSettings={claudeSettings} />
                         </ErrorBoundary>
                       </motion.div>
                     );
