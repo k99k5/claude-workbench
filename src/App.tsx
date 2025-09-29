@@ -82,6 +82,9 @@ function AppContent() {
   const [pendingView, setPendingView] = useState<View | null>(null);
   const [newSessionProjectPath, setNewSessionProjectPath] = useState<string>("");
 
+  // 🔧 NEW: Navigation history stack for smart back functionality
+  const [navigationHistory, setNavigationHistory] = useState<View[]>(["welcome"]);
+
   // 在项目视图中挂载时加载项目
   // Load projects on mount when in projects view
   useEffect(() => {
