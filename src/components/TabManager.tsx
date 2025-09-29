@@ -67,9 +67,12 @@ export const TabManager: React.FC<TabManagerProps> = ({
     setDraggedTab(null);
   }, []);
 
-  // 初始化时创建标签页
+  // 🔧 FIX: 只在真正的初始化时创建标签页，避免用户关闭所有标签页后自动创建
   useEffect(() => {
-    if (tabs.length === 0) {
+    // 只在首次初始化且没有现有标签页时创建
+    if (!hasInitializedRef.current && tabs.length === 0) {
+      console.log('[TabManager] Initial setup - creating first tab');
+
       // 如果有初始会话，使用它创建标签页
       if (initialSession) {
         createNewTab(initialSession);
@@ -78,12 +81,21 @@ export const TabManager: React.FC<TabManagerProps> = ({
       else if (initialProjectPath) {
         createNewTab(undefined, initialProjectPath);
       }
-      // 否则创建默认标签页
+      // 否则创建默认标签页（仅在真正的初始化时）
       else {
         createNewTab();
       }
+
+      hasInitializedRef.current = true;
     }
-  }, [createNewTab, tabs.length, initialSession, initialProjectPath]);
+  }, [createNewTab, initialSession, initialProjectPath]); // 🔧 移除tabs.length依赖
+
+  // 🔧 NEW: Reset initialization flag when component unmounts
+  useEffect(() => {
+    return () => {
+      hasInitializedRef.current = false;
+    };
+  }, []);
 
   return (
     <TooltipProvider>
