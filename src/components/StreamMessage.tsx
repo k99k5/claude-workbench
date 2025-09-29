@@ -13,7 +13,6 @@ import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { getClaudeSyntaxTheme } from "@/lib/claudeSyntaxTheme";
 import { useTheme } from "@/contexts/ThemeContext";
-import { api } from "@/lib/api";
 import { tokenExtractor } from "@/lib/tokenExtractor";
 import type { ClaudeStreamMessage } from "./AgentExecution";
 
