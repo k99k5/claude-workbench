@@ -48,11 +48,19 @@ interface TabProviderProps {
 
 /**
  * TabProvider - 提供全局标签页状态管理
+ * 🔧 ARCHITECTURE FIX: Use single source of truth for active state
  */
 export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
-  const [tabs, setTabs] = useState<TabSession[]>([]);
+  // 🔧 Store raw data without isActive field
+  const [tabsData, setTabsData] = useState<TabSessionData[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const nextTabId = useRef(1);
+
+  // 🔧 Compute tabs with isActive derived from activeTabId
+  const tabs: TabSession[] = tabsData.map(tabData => ({
+    ...tabData,
+    isActive: tabData.id === activeTabId,
+  }));
 
   // 生成唯一的标签页ID
   const generateTabId = useCallback(() => {
