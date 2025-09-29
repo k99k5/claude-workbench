@@ -1,12 +1,12 @@
 import { useState, useCallback, useRef, useContext, createContext, ReactNode } from 'react';
 import type { Session } from '@/lib/api';
 
-export interface TabSession {
+// 🔧 ARCHITECTURE FIX: Remove isActive from interface to eliminate dual state
+export interface TabSessionData {
   id: string;
   title: string;
   projectPath?: string;
   session?: Session;
-  isActive: boolean;
   isLoading: boolean;
   hasChanges: boolean;
   streamingStatus?: {
@@ -15,8 +15,12 @@ export interface TabSession {
   };
   createdAt: number;
   lastActivityAt: number;
-  // 🔧 NEW: Resource cleanup callback
   cleanup?: () => Promise<void> | void;
+}
+
+// 🔧 NEW: Computed interface with isActive derived from activeTabId
+export interface TabSession extends TabSessionData {
+  isActive: boolean; // Computed from activeTabId, not stored
 }
 
 interface TabContextValue {
