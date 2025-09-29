@@ -369,7 +369,7 @@ function AppContent() {
       case "cc-agents":
         return (
           <CCAgents
-            onBack={() => handleViewChange("welcome")}
+            onBack={handleSmartBack}
             onNavigate={(view) => handleViewChange(view as View)}
           />
         );
@@ -377,14 +377,14 @@ function AppContent() {
       case "subagent-manager":
         return (
           <SubagentManager
-            onBack={() => handleViewChange("cc-agents")}
+            onBack={handleSmartBack}
           />
         );
 
       case "enhanced-hooks-manager":
         return (
           <EnhancedHooksManager
-            onBack={() => handleViewChange("cc-agents")}
+            onBack={handleSmartBack}
             projectPath={projectForSettings?.path}
           />
         );
