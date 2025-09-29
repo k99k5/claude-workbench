@@ -105,6 +105,8 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
   // Hooks configuration state
   const [isHooksDialogOpen, setIsHooksDialogOpen] = useState(false);
   const [activeHooksTab, setActiveHooksTab] = useState("project");
+  // Settings state to avoid repeated loading in StreamMessage components
+  const [claudeSettings, setClaudeSettings] = useState<{ showSystemInitialization?: boolean }>({});
 
   // Execution stats
   const [executionStartTime, setExecutionStartTime] = useState<number | null>(null);
