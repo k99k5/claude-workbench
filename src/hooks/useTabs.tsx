@@ -121,18 +121,18 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
     setActiveTabId(tabId);
   }, []);
 
-  // 关闭标签页
-  const closeTab = useCallback(async (tabId: string, force = false) => {
-    // 🔧 CRITICAL FIX: Call cleanup before removing tab
+  // 🔧 NEW: Check if tab can be closed (separate from actual closing)
+  const canCloseTab = useCallback((tabId: string) => {
     const tab = tabsData.find(t => t.id === tabId);
+    return {
+      canClose: !tab?.hasChanges,
+      hasUnsavedChanges: Boolean(tab?.hasChanges),
+    };
+  }, [tabsData]);
 
-    // 如果标签页有未保存的更改且不是强制关闭，显示确认对话框
-    if (!force && tab?.hasChanges) {
-      const shouldClose = confirm('此会话有未保存的更改，确定要关闭吗？');
-      if (!shouldClose) {
-        return; // 不关闭
-      }
-    }
+  // 🔧 NEW: Force close tab without confirmation
+  const forceCloseTab = useCallback(async (tabId: string) => {
+    const tab = tabsData.find(t => t.id === tabId);
 
     // Execute cleanup callback if present
     if (tab?.cleanup) {
@@ -161,6 +161,25 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
       return remainingTabsData;
     });
   }, [activeTabId, tabsData]);
+
+  // 关闭标签页 (with UI confirmation)
+  const closeTab = useCallback(async (tabId: string, force = false) => {
+    if (force) {
+      return forceCloseTab(tabId);
+    }
+
+    const { canClose, hasUnsavedChanges } = canCloseTab(tabId);
+
+    if (!canClose && hasUnsavedChanges) {
+      // 🔧 MOVED: UI logic should be handled by the component layer
+      const shouldClose = confirm('此会话有未保存的更改，确定要关闭吗？');
+      if (!shouldClose) {
+        return; // 不关闭
+      }
+    }
+
+    return forceCloseTab(tabId);
+  }, [canCloseTab, forceCloseTab]);
 
   // 更新标签页流状态
   const updateTabStreamingStatus = useCallback((tabId: string, isStreaming: boolean, sessionId: string | null) => {
