@@ -339,6 +339,18 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     onStreamingChange?.(isLoading, claudeSessionId);
   }, [isLoading, claudeSessionId, onStreamingChange]);
 
+  // 🔧 NEW: Handle active/inactive state changes for event listener management
+  useEffect(() => {
+    if (!isActive && isListeningRef.current) {
+      // Tab became inactive, clean up event listeners to prevent conflicts
+      console.log('[ClaudeCodeSession] Tab became inactive, cleaning up event listeners');
+      unlistenRefs.current.forEach(unlisten => unlisten && typeof unlisten === 'function' && unlisten());
+      unlistenRefs.current = [];
+      isListeningRef.current = false;
+    }
+    // Note: When tab becomes active, listeners will be set up by handleSendPrompt
+  }, [isActive]);
+
   // Smart scroll detection - detect when user manually scrolls
   useEffect(() => {
     const scrollElement = parentRef.current;
