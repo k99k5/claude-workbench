@@ -60,7 +60,7 @@ export const TabSessionWrapper: React.FC<TabSessionWrapperProps> = ({
     } else if (isActive && tab) {
       console.log(`[TabSessionWrapper] Tab ${tabId} is now active`);
     }
-  }, [isActive, tabId, tab]);
+  }, [isActive, tabId]); // 移除tab依赖，避免对象引用变化导致的无限循环
 
   return (
     <div
