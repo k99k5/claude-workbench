@@ -243,6 +243,7 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
     getActiveTab,
     openSessionInBackground,
     getTabStats,
+    registerTabCleanup,
   };
 
   return (
