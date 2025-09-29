@@ -387,14 +387,14 @@ function AppContent() {
                     <p className="text-sm text-muted-foreground">
                       {t('common.browseClaudeSessions')}
                     </p>
-                    {/* 🔧 MOVED: 返回主页按钮移到右侧，降低显著性 */}
+                    {/* 🔧 IMPROVED: 更清晰的返回主页按钮样式和位置 */}
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => handleViewChange("welcome")}
-                      className="text-xs text-muted-foreground hover:text-foreground"
+                      className="text-xs text-muted-foreground hover:text-foreground opacity-70 hover:opacity-100 transition-all duration-200"
                     >
-                      {t('common.backToHome')}
+                      ← 主页
                     </Button>
                   </div>
                 </div>
