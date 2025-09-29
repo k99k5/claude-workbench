@@ -200,7 +200,8 @@ function AppContent() {
   };
 
   /**
-   * Handles view changes with navigation protection
+   * 🔧 IMPROVED: Smart navigation with history tracking
+   * Handles view changes with navigation protection and history management
    */
   const handleViewChange = (newView: View) => {
     // Check if we're navigating away from an active Claude session
@@ -210,8 +211,37 @@ function AppContent() {
       setShowNavigationConfirm(true);
       return;
     }
-    
+
+    // 🔧 NEW: Add current view to history before navigating
+    setNavigationHistory(prev => {
+      // Avoid duplicate consecutive entries
+      if (prev[prev.length - 1] !== view) {
+        return [...prev, view];
+      }
+      return prev;
+    });
+
+    setPreviousView(view);
     setView(newView);
+  };
+
+  /**
+   * 🔧 NEW: Smart back function that uses navigation history
+   */
+  const handleSmartBack = () => {
+    if (navigationHistory.length > 1) {
+      // Remove current view and get previous one
+      const newHistory = [...navigationHistory];
+      newHistory.pop(); // Remove current
+      const previousView = newHistory[newHistory.length - 1];
+
+      setNavigationHistory(newHistory);
+      setView(previousView);
+      return previousView;
+    }
+    // Fallback to welcome if no history
+    setView("welcome");
+    return "welcome";
   };
 
   /**
