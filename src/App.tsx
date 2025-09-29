@@ -399,7 +399,7 @@ function AppContent() {
       case "settings":
         return (
           <div className="flex-1 flex flex-col" style={{ minHeight: 0 }}>
-            <Settings onBack={() => handleViewChange("welcome")} />
+            <Settings onBack={handleSmartBack} />
           </div>
         );
       
