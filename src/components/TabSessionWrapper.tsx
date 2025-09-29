@@ -16,8 +16,9 @@ interface TabSessionWrapperProps {
 /**
  * TabSessionWrapper - 标签页会话包装器
  * 为每个标签页提供独立的会话状态管理和生命周期控制
+ * 使用React.memo优化，避免不必要的重新渲染
  */
-export const TabSessionWrapper: React.FC<TabSessionWrapperProps> = ({
+const TabSessionWrapperComponent: React.FC<TabSessionWrapperProps> = ({
   tabId,
   session,
   initialProjectPath,
