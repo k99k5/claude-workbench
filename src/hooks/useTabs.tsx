@@ -264,15 +264,22 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
     );
   }, []);
 
-  // 根据ID获取标签页（使用useMemo优化，避免不必要的重新创建）
+  // 根据ID获取标签页（🔧 PERFORMANCE: O(1) lookup using Map）
   const getTabById = useCallback((tabId: string): TabSession | undefined => {
-    return tabs.find(tab => tab.id === tabId);
-  }, [tabs]);
+    const tabData = tabsMapRef.current.get(tabId);
+    if (!tabData) return undefined;
 
-  // 获取当前活跃标签页
+    return {
+      ...tabData,
+      isActive: tabData.id === activeTabId,
+    };
+  }, [activeTabId]);
+
+  // 获取当前活跃标签页（🔧 PERFORMANCE: Direct lookup instead of array search）
   const getActiveTab = useCallback((): TabSession | undefined => {
-    return tabs.find(tab => tab.isActive);
-  }, [tabs]);
+    if (!activeTabId) return undefined;
+    return getTabById(activeTabId);
+  }, [activeTabId, getTabById]);
 
   // 后台打开会话（不激活）
   const openSessionInBackground = useCallback((session: Session): { tabId: string; isNew: boolean } => {
