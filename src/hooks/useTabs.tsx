@@ -118,18 +118,29 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
   }, []);
 
   // 关闭标签页
-  const closeTab = useCallback((tabId: string, force = false) => {
-    setTabs(prevTabs => {
-      const tab = prevTabs.find(t => t.id === tabId);
+  const closeTab = useCallback(async (tabId: string, force = false) => {
+    // 🔧 CRITICAL FIX: Call cleanup before removing tab
+    const tab = tabs.find(t => t.id === tabId);
 
-      // 如果标签页有未保存的更改且不是强制关闭，显示确认对话框
-      if (!force && tab?.hasChanges) {
-        const shouldClose = confirm('此会话有未保存的更改，确定要关闭吗？');
-        if (!shouldClose) {
-          return prevTabs; // 不关闭，返回原始状态
-        }
+    // 如果标签页有未保存的更改且不是强制关闭，显示确认对话框
+    if (!force && tab?.hasChanges) {
+      const shouldClose = confirm('此会话有未保存的更改，确定要关闭吗？');
+      if (!shouldClose) {
+        return; // 不关闭
       }
+    }
 
+    // Execute cleanup callback if present
+    if (tab?.cleanup) {
+      try {
+        console.log(`[useTabs] Executing cleanup for tab ${tabId}`);
+        await tab.cleanup();
+      } catch (error) {
+        console.error(`[useTabs] Cleanup failed for tab ${tabId}:`, error);
+      }
+    }
+
+    setTabs(prevTabs => {
       const remainingTabs = prevTabs.filter(t => t.id !== tabId);
 
       // 如果关闭的是当前活跃标签页，需要激活另一个标签页
@@ -154,7 +165,7 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
 
       return remainingTabs;
     });
-  }, [activeTabId]);
+  }, [activeTabId, tabs]);
 
   // 更新标签页流状态
   const updateTabStreamingStatus = useCallback((tabId: string, isStreaming: boolean, sessionId: string | null) => {
