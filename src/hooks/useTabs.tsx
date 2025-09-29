@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useContext, createContext, ReactNode } from 'react';
+import { useState, useCallback, useRef, useContext, createContext, ReactNode, useEffect } from 'react';
 import type { Session } from '@/lib/api';
 
 // 🔧 ARCHITECTURE FIX: Remove isActive from interface to eliminate dual state
