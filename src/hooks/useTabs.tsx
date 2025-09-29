@@ -287,7 +287,7 @@ export const useActiveTab = (): TabSession | undefined => {
  * useTabSession - 获取特定标签页的会话管理钩子
  */
 export const useTabSession = (tabId: string) => {
-  const { getTabById, updateTabChanges, updateTabStreamingStatus, updateTabTitle } = useTabs();
+  const { getTabById, updateTabChanges, updateTabStreamingStatus, updateTabTitle, registerTabCleanup } = useTabs();
 
   const tab = getTabById(tabId);
 
@@ -307,11 +307,17 @@ export const useTabSession = (tabId: string) => {
     updateTabStreamingStatus(tabId, isStreaming, sessionId);
   }, [tabId, updateTabStreamingStatus]);
 
+  // 🔧 NEW: Register cleanup callback
+  const setCleanup = useCallback((cleanup: () => Promise<void> | void) => {
+    registerTabCleanup(tabId, cleanup);
+  }, [tabId, registerTabCleanup]);
+
   return {
     tab,
     markAsChanged,
     markAsUnchanged,
     updateTitle,
     updateStreaming,
+    setCleanup,
   };
 };
