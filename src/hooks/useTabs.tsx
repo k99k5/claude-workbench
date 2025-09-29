@@ -162,33 +162,33 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
 
   // 更新标签页流状态
   const updateTabStreamingStatus = useCallback((tabId: string, isStreaming: boolean, sessionId: string | null) => {
-    setTabs(prevTabs =>
-      prevTabs.map(tab =>
-        tab.id === tabId
+    setTabsData(prevTabsData =>
+      prevTabsData.map(tabData =>
+        tabData.id === tabId
           ? {
-              ...tab,
+              ...tabData,
               streamingStatus: { isStreaming, sessionId },
               lastActivityAt: Date.now(),
             }
-          : tab
+          : tabData
       )
     );
   }, []);
 
   // 更新标签页变更状态
   const updateTabChanges = useCallback((tabId: string, hasChanges: boolean) => {
-    setTabs(prevTabs =>
-      prevTabs.map(tab =>
-        tab.id === tabId ? { ...tab, hasChanges } : tab
+    setTabsData(prevTabsData =>
+      prevTabsData.map(tabData =>
+        tabData.id === tabId ? { ...tabData, hasChanges } : tabData
       )
     );
   }, []);
 
   // 更新标签页标题
   const updateTabTitle = useCallback((tabId: string, title: string) => {
-    setTabs(prevTabs =>
-      prevTabs.map(tab =>
-        tab.id === tabId ? { ...tab, title } : tab
+    setTabsData(prevTabsData =>
+      prevTabsData.map(tabData =>
+        tabData.id === tabId ? { ...tabData, title } : tabData
       )
     );
   }, []);
