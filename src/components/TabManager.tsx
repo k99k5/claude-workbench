@@ -71,19 +71,21 @@ export const TabManager: React.FC<TabManagerProps> = ({
   useEffect(() => {
     // 只在首次初始化且没有现有标签页时创建
     if (!hasInitializedRef.current && tabs.length === 0) {
-      console.log('[TabManager] Initial setup - creating first tab');
+      console.log('[TabManager] Initial setup - checking if tab creation is needed');
 
       // 如果有初始会话，使用它创建标签页
       if (initialSession) {
+        console.log('[TabManager] Creating tab for initial session');
         createNewTab(initialSession);
       }
       // 如果有初始项目路径，使用它创建标签页
       else if (initialProjectPath) {
+        console.log('[TabManager] Creating tab for initial project path');
         createNewTab(undefined, initialProjectPath);
       }
-      // 否则创建默认标签页（仅在真正的初始化时）
+      // 🔧 IMPROVED: 不再自动创建默认标签页，让用户主动选择
       else {
-        createNewTab();
+        console.log('[TabManager] No initial session or path - showing empty state');
       }
 
       hasInitializedRef.current = true;
