@@ -28,7 +28,7 @@ interface TabContextValue {
   activeTabId: string | null;
   createNewTab: (session?: Session, projectPath?: string, activate?: boolean) => string;
   switchToTab: (tabId: string) => void;
-  closeTab: (tabId: string, force?: boolean) => void;
+  closeTab: (tabId: string, force?: boolean) => Promise<void>;
   updateTabStreamingStatus: (tabId: string, isStreaming: boolean, sessionId: string | null) => void;
   updateTabChanges: (tabId: string, hasChanges: boolean) => void;
   updateTabTitle: (tabId: string, title: string) => void;
@@ -36,8 +36,10 @@ interface TabContextValue {
   getActiveTab: () => TabSession | undefined;
   openSessionInBackground: (session: Session) => { tabId: string; isNew: boolean };
   getTabStats: () => { total: number; active: number; hasChanges: number };
-  // 🔧 NEW: Register cleanup callback for a tab
   registerTabCleanup: (tabId: string, cleanup: () => Promise<void> | void) => void;
+  // 🔧 NEW: Separate UI logic from state management
+  canCloseTab: (tabId: string) => { canClose: boolean; hasUnsavedChanges: boolean };
+  forceCloseTab: (tabId: string) => Promise<void>;
 }
 
 const TabContext = createContext<TabContextValue | null>(null);
