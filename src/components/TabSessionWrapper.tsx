@@ -68,11 +68,8 @@ const TabSessionWrapperComponent: React.FC<TabSessionWrapperProps> = ({
 
   return (
     <div
-      style={{
-        display: isActive ? 'block' : 'none',
-        height: '100%',
-        width: '100%',
-      }}
+      className="h-full w-full"
+      // 🔧 REMOVED: display control CSS - now using conditional rendering
     >
       <ClaudeCodeSession
         session={session}
