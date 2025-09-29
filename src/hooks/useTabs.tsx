@@ -185,7 +185,7 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
     );
   }, []);
 
-  // 根据ID获取标签页
+  // 根据ID获取标签页（使用useMemo优化，避免不必要的重新创建）
   const getTabById = useCallback((tabId: string): TabSession | undefined => {
     return tabs.find(tab => tab.id === tabId);
   }, [tabs]);
