@@ -32,6 +32,8 @@ interface TabContextValue {
   getActiveTab: () => TabSession | undefined;
   openSessionInBackground: (session: Session) => { tabId: string; isNew: boolean };
   getTabStats: () => { total: number; active: number; hasChanges: number };
+  // 🔧 NEW: Register cleanup callback for a tab
+  registerTabCleanup: (tabId: string, cleanup: () => Promise<void> | void) => void;
 }
 
 const TabContext = createContext<TabContextValue | null>(null);
