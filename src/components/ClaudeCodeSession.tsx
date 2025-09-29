@@ -86,6 +86,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   onProjectSettings,
   className,
   onStreamingChange,
+  isActive = true, // 默认为活跃状态，保持向后兼容
 }) => {
   const [projectPath, setProjectPath] = useState(initialProjectPath || session?.project_path || "");
   const [messages, setMessages] = useState<ClaudeStreamMessage[]>([]);
