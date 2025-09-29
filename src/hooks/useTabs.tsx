@@ -59,6 +59,17 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const nextTabId = useRef(1);
 
+  // 🔧 PERFORMANCE: Use Map for O(1) tab lookup
+  const tabsMapRef = useRef<Map<string, TabSessionData>>(new Map());
+
+  // Update tabs map when tabsData changes
+  useEffect(() => {
+    tabsMapRef.current.clear();
+    tabsData.forEach(tab => {
+      tabsMapRef.current.set(tab.id, tab);
+    });
+  }, [tabsData]);
+
   // 🔧 NEW: State persistence
   const STORAGE_KEY = 'claude-workbench-tabs-state';
 
