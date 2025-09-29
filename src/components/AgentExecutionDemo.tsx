@@ -1,11 +1,29 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { StreamMessage } from "./StreamMessage";
 import type { ClaudeStreamMessage } from "./AgentExecution";
+import { api } from "@/lib/api";
 
 /**
  * Demo component showing all the different message types and tools
  */
 export const AgentExecutionDemo: React.FC = () => {
+  // Settings state to avoid repeated loading in StreamMessage components
+  const [claudeSettings, setClaudeSettings] = useState<{ showSystemInitialization?: boolean }>({});
+
+  // Load Claude settings once for all StreamMessage components
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const settings = await api.getClaudeSettings();
+        setClaudeSettings(settings);
+      } catch (error) {
+        console.error("Failed to load Claude settings:", error);
+        setClaudeSettings({ showSystemInitialization: true }); // Default fallback
+      }
+    };
+
+    loadSettings();
+  }, []);
   // Sample messages based on the provided JSONL session
   const messages: ClaudeStreamMessage[] = [
     // Skip meta message (should not render)
