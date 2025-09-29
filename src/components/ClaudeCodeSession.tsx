@@ -300,7 +300,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     if (session) {
       // Set the claudeSessionId immediately when we have a session
       setClaudeSessionId(session.id);
-      
+
       // Load session history first, then check for active session
       const initializeSession = async () => {
         await loadSessionHistory();
@@ -309,10 +309,25 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           await checkForActiveSession();
         }
       };
-      
+
       initializeSession();
     }
   }, [session]); // Remove hasLoadedSession dependency to ensure it runs on mount
+
+  // Load Claude settings once for all StreamMessage components
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const settings = await api.getClaudeSettings();
+        setClaudeSettings(settings);
+      } catch (error) {
+        console.error("Failed to load Claude settings:", error);
+        setClaudeSettings({ showSystemInitialization: true }); // Default fallback
+      }
+    };
+
+    loadSettings();
+  }, []);
 
   // Report streaming state changes
   useEffect(() => {
