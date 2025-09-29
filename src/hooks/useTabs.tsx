@@ -51,12 +51,51 @@ interface TabProviderProps {
 /**
  * TabProvider - 提供全局标签页状态管理
  * 🔧 ARCHITECTURE FIX: Use single source of truth for active state
+ * 🔧 NEW: Add state persistence
  */
 export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
   // 🔧 Store raw data without isActive field
   const [tabsData, setTabsData] = useState<TabSessionData[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const nextTabId = useRef(1);
+
+  // 🔧 NEW: State persistence
+  const STORAGE_KEY = 'claude-workbench-tabs-state';
+
+  // Load persisted state on mount
+  useEffect(() => {
+    try {
+      const persistedState = localStorage.getItem(STORAGE_KEY);
+      if (persistedState) {
+        const { tabsData: savedTabsData, activeTabId: savedActiveTabId } = JSON.parse(persistedState);
+        if (Array.isArray(savedTabsData)) {
+          // Filter out sessions that might be invalid and cleanup callbacks (not serializable)
+          const validTabsData = savedTabsData.map((tab: any) => ({
+            ...tab,
+            cleanup: undefined, // Will be re-registered when components mount
+          }));
+          setTabsData(validTabsData);
+          setActiveTabId(savedActiveTabId);
+          console.log('[useTabs] Restored tab state from localStorage:', validTabsData.length, 'tabs');
+        }
+      }
+    } catch (error) {
+      console.error('[useTabs] Failed to restore tab state:', error);
+    }
+  }, []);
+
+  // Persist state when it changes
+  useEffect(() => {
+    try {
+      const stateToSave = {
+        tabsData: tabsData.map(tab => ({ ...tab, cleanup: undefined })), // Don't serialize functions
+        activeTabId,
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
+    } catch (error) {
+      console.error('[useTabs] Failed to persist tab state:', error);
+    }
+  }, [tabsData, activeTabId]);
 
   // 🔧 Compute tabs with isActive derived from activeTabId
   const tabs: TabSession[] = tabsData.map(tabData => ({
