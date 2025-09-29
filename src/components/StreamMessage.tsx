@@ -74,12 +74,12 @@ interface StreamMessageProps {
 /**
  * Component to render a single Claude Code stream message
  */
-const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, className, streamMessages, onLinkDetected }) => {
+const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, className, streamMessages, onLinkDetected, claudeSettings }) => {
   const { theme } = useTheme();
   // State to track tool results mapped by tool call ID
   const [toolResults, setToolResults] = useState<Map<string, any>>(new Map());
-  // State to track system initialization visibility setting
-  const [showSystemInit, setShowSystemInit] = useState<boolean>(true);
+  // Use claudeSettings from props with fallback default
+  const showSystemInit = claudeSettings?.showSystemInitialization !== false; // Default to true if not set
   
   // Load settings on component mount
   useEffect(() => {
