@@ -55,12 +55,15 @@ export const TabSessionWrapper: React.FC<TabSessionWrapperProps> = ({
 
   // 当标签页变为非活跃时，保持会话状态在后台
   useEffect(() => {
-    if (!isActive && tab) {
+    // 使用tabId来获取最新的tab信息，避免依赖tab对象引用
+    const currentTab = tab; // tab来自useTabSession，但不作为依赖
+
+    if (!isActive && currentTab) {
       console.log(`[TabSessionWrapper] Tab ${tabId} is now in background, preserving state`);
-    } else if (isActive && tab) {
+    } else if (isActive && currentTab) {
       console.log(`[TabSessionWrapper] Tab ${tabId} is now active`);
     }
-  }, [isActive, tabId]); // 移除tab依赖，避免对象引用变化导致的无限循环
+  }, [isActive, tabId]); // 只依赖isActive和tabId，避免对象引用变化导致的无限循环
 
   return (
     <div
