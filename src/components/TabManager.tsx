@@ -207,29 +207,37 @@ export const TabManager: React.FC<TabManagerProps> = ({
 
         {/* 标签页内容区域 */}
         <div className="flex-1 relative overflow-hidden">
-          {/* 渲染所有标签页，通过显示/隐藏控制状态保持 */}
-          {tabs.map((tab) => (
-            <TabSessionWrapper
-              key={tab.id}
-              tabId={tab.id}
-              session={tab.session}
-              initialProjectPath={tab.projectPath}
-              isActive={tab.isActive}
-              onBack={() => {
-                // 如果只有一个标签页，直接返回
-                if (tabs.length === 1) {
-                  onBack();
-                } else {
-                  // 否则关闭当前标签页
-                  closeTab(tab.id);
+          {/* 🔧 PERFORMANCE FIX: 只渲染活跃标签页，而非所有标签页 */}
+          {/* 这大幅减少内存使用和CPU开销 */}
+          {tabs.map((tab) => {
+            // 只渲染活跃标签页
+            if (!tab.isActive) {
+              return null;
+            }
+
+            return (
+              <TabSessionWrapper
+                key={tab.id}
+                tabId={tab.id}
+                session={tab.session}
+                initialProjectPath={tab.projectPath}
+                isActive={tab.isActive}
+                onBack={() => {
+                  // 如果只有一个标签页，直接返回
+                  if (tabs.length === 1) {
+                    onBack();
+                  } else {
+                    // 否则关闭当前标签页
+                    closeTab(tab.id);
+                  }
+                }}
+                onProjectSettings={onProjectSettings}
+                onStreamingChange={(isStreaming, sessionId) =>
+                  updateTabStreamingStatus(tab.id, isStreaming, sessionId)
                 }
-              }}
-              onProjectSettings={onProjectSettings}
-              onStreamingChange={(isStreaming, sessionId) =>
-                updateTabStreamingStatus(tab.id, isStreaming, sessionId)
-              }
-            />
-          ))}
+              />
+            );
+          })}
 
           {/* 无标签页时的占位符 */}
           {tabs.length === 0 && (
