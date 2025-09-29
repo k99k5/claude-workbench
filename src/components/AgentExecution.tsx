@@ -216,6 +216,21 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
     };
   }, []);
 
+  // Load Claude settings once for all StreamMessage components
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const settings = await api.getClaudeSettings();
+        setClaudeSettings(settings);
+      } catch (error) {
+        console.error("Failed to load Claude settings:", error);
+        setClaudeSettings({ showSystemInitialization: true }); // Default fallback
+      }
+    };
+
+    loadSettings();
+  }, []);
+
   // Check if user is at the very bottom of the scrollable container
   const isAtBottom = () => {
     const container = isFullscreenModalOpen ? fullscreenScrollRef.current : scrollContainerRef.current;
