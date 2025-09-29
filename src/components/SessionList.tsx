@@ -85,14 +85,15 @@ export const SessionList: React.FC<SessionListProps> = ({
         transition={{ duration: 0.3 }}
         className="flex items-center space-x-3"
       >
+        {/* 🔧 IMPROVED: 提升返回项目列表按钮的显著性 */}
         <Button
-          variant="outline"
-          size="sm"
+          variant="default"
+          size="default"
           onClick={onBack}
-          className="h-9 px-3 border-border hover:bg-accent hover:text-accent-foreground transition-colors"
+          className="h-10 px-4 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold transition-all duration-200 shadow-md"
         >
           <ArrowLeft className="h-4 w-4 mr-2" />
-          <span className="font-medium">返回项目列表</span>
+          <span>返回项目列表</span>
         </Button>
         <div className="flex-1 min-w-0">
           <h2 className="text-base font-medium truncate">{projectPath}</h2>
