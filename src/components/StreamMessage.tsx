@@ -68,6 +68,7 @@ interface StreamMessageProps {
   className?: string;
   streamMessages: ClaudeStreamMessage[];
   onLinkDetected?: (url: string) => void;
+  claudeSettings?: { showSystemInitialization?: boolean };
 }
 
 /**
