@@ -109,12 +109,12 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
 
   // 切换到指定标签页
   const switchToTab = useCallback((tabId: string) => {
-    setTabs(prevTabs =>
-      prevTabs.map(tab => ({
-        ...tab,
-        isActive: tab.id === tabId,
-        lastActivityAt: tab.id === tabId ? Date.now() : tab.lastActivityAt,
-      }))
+    setTabsData(prevTabsData =>
+      prevTabsData.map(tabData =>
+        tabData.id === tabId
+          ? { ...tabData, lastActivityAt: Date.now() }
+          : tabData
+      )
     );
     setActiveTabId(tabId);
   }, []);
