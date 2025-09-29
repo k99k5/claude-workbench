@@ -27,11 +27,22 @@ const TabSessionWrapperComponent: React.FC<TabSessionWrapperProps> = ({
   onStreamingChange,
   isActive,
 }) => {
-  const { tab, updateTitle, updateStreaming } = useTabSession(tabId);
+  const { tab, updateTitle, updateStreaming, setCleanup } = useTabSession(tabId);
   const sessionRef = useRef<{ hasChanges: boolean; sessionId: string | null }>({
     hasChanges: false,
     sessionId: null,
   });
+
+  // 🔧 NEW: Register cleanup callback for proper resource management
+  useEffect(() => {
+    const cleanup = async () => {
+      console.log(`[TabSessionWrapper] Cleaning up resources for tab ${tabId}`);
+      // This will be called when the tab is closed
+      // The ClaudeCodeSession cleanup is handled by its own useEffect
+    };
+
+    setCleanup(cleanup);
+  }, [tabId, setCleanup]);
 
   // 包装 onStreamingChange 以更新标签页状态
   const handleStreamingChange = (isStreaming: boolean, sessionId: string | null) => {
