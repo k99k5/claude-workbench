@@ -374,26 +374,29 @@ function AppContent() {
         return (
           <div className="flex-1 overflow-y-auto">
             <div className="container mx-auto p-6">
-              {/* Header with back button */}
+              {/* Header with navigation - 🔧 IMPROVED: Reduce prominence of home button */}
               <motion.div
                 initial={{ opacity: 0, y: -20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5 }}
                 className="mb-6"
               >
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleViewChange("welcome")}
-                  className="mb-4"
-                >
-                  {t('common.backToHome')}
-                </Button>
                 <div className="mb-4">
                   <h1 className="text-3xl font-bold tracking-tight">{t('common.ccProjectsTitle')}</h1>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {t('common.browseClaudeSessions')}
-                  </p>
+                  <div className="flex items-center justify-between mt-1">
+                    <p className="text-sm text-muted-foreground">
+                      {t('common.browseClaudeSessions')}
+                    </p>
+                    {/* 🔧 MOVED: 返回主页按钮移到右侧，降低显著性 */}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleViewChange("welcome")}
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      {t('common.backToHome')}
+                    </Button>
+                  </div>
                 </div>
               </motion.div>
 
