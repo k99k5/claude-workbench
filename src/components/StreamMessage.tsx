@@ -80,22 +80,7 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
   const [toolResults, setToolResults] = useState<Map<string, any>>(new Map());
   // Use claudeSettings from props with fallback default
   const showSystemInit = claudeSettings?.showSystemInitialization !== false; // Default to true if not set
-  
-  // Load settings on component mount
-  useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        const settings = await api.getClaudeSettings();
-        setShowSystemInit(settings.showSystemInitialization !== false); // Default to true if not set
-      } catch (error) {
-        console.error("Failed to load settings:", error);
-        setShowSystemInit(true); // Default to true on error
-      }
-    };
-    
-    loadSettings();
-  }, []);
-  
+
   // Extract all tool results from stream messages
   useEffect(() => {
     const results = new Map<string, any>();
