@@ -601,12 +601,12 @@ function AppContent() {
       
       case "usage-dashboard":
         return (
-          <UsageDashboard onBack={() => handleViewChange("welcome")} />
+          <UsageDashboard onBack={handleSmartBack} />
         );
-      
+
       case "mcp":
         return (
-          <MCPManager onBack={() => handleViewChange("welcome")} />
+          <MCPManager onBack={handleSmartBack} />
         );
       
       case "project-settings":
