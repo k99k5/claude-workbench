@@ -1925,10 +1925,11 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                   top: virtualItem.start,
                 }}
               >
-                <StreamMessage 
-                  message={message} 
+                <StreamMessage
+                  message={message}
                   streamMessages={messages}
                   onLinkDetected={handleLinkDetected}
+                  claudeSettings={claudeSettings}
                 />
               </motion.div>
             );
