@@ -392,7 +392,7 @@ function AppContent() {
       case "editor":
         return (
           <div className="flex-1 overflow-hidden">
-            <MarkdownEditor onBack={() => handleViewChange("welcome")} />
+            <MarkdownEditor onBack={handleSmartBack} />
           </div>
         );
       
