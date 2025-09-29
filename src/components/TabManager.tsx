@@ -55,6 +55,8 @@ export const TabManager: React.FC<TabManagerProps> = ({
 
   const [draggedTab, setDraggedTab] = useState<string | null>(null);
   const tabsContainerRef = useRef<HTMLDivElement>(null);
+  // 🔧 FIX: Track initialization to prevent auto-creation after user closes all tabs
+  const hasInitializedRef = useRef(false);
 
   // 拖拽处理
   const handleTabDragStart = useCallback((tabId: string) => {
