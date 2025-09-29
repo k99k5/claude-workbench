@@ -80,6 +80,7 @@ const TabSessionWrapperComponent: React.FC<TabSessionWrapperProps> = ({
         onBack={onBack}
         onProjectSettings={onProjectSettings}
         onStreamingChange={handleStreamingChange}
+        isActive={isActive}
       />
     </div>
   );
