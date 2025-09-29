@@ -192,7 +192,7 @@ body {
       <h1 className="text-2xl font-bold mb-6">Agent Execution Demo</h1>
       
       {messages.map((message, idx) => (
-        <StreamMessage key={idx} message={message} streamMessages={messages} />
+        <StreamMessage key={idx} message={message} streamMessages={messages} claudeSettings={claudeSettings} />
       ))}
     </div>
   );
