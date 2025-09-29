@@ -67,6 +67,10 @@ interface ClaudeCodeSessionProps {
    * Callback when streaming state changes
    */
   onStreamingChange?: (isStreaming: boolean, sessionId: string | null) => void;
+  /**
+   * Whether this session is currently active (for event listener management)
+   */
+  isActive?: boolean;
 }
 
 /**
