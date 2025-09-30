@@ -472,7 +472,7 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
   const handleCopyAsMarkdown = async () => {
     let markdown = `# Agent Execution: ${agent.name}\n\n`;
     markdown += `**Task:** ${task}\n`;
-    markdown += `**Model:** ${model === 'opus' ? 'Claude 4.1 Opus' : 'Claude 4 Sonnet'}\n`;
+    markdown += `**Model:** ${model === 'opus' ? 'Claude 4.1 Opus' : 'Claude 4.5 Sonnet'}\n`;
     markdown += `**Date:** ${new Date().toISOString()}\n\n`;
     markdown += `---\n\n`;
 
@@ -573,7 +573,7 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
                     <div>
                       <h1 className="text-xl font-bold">执行: {agent.name}</h1>
                       <p className="text-sm text-muted-foreground">
-                        {model === 'opus' ? 'Claude 4.1 Opus' : 'Claude 4 Sonnet'}
+                        {model === 'opus' ? 'Claude 4.1 Opus' : 'Claude 4.5 Sonnet'}
                       </p>
                     </div>
                   </div>
@@ -666,7 +666,7 @@ export const AgentExecution: React.FC<AgentExecutionProps> = ({
                         <div className="w-1.5 h-1.5 rounded-full bg-primary-foreground" />
                       )}
                     </div>
-                    <span>Claude 4 Sonnet</span>
+                    <span>Claude 4.5 Sonnet</span>
                   </div>
                 </button>
                 

@@ -112,6 +112,7 @@
   },
   "common": {
     "backToHome": "← Back to Home",
+    "newProject": "New Project",
     "newClaudeSession": "New Claude Code session",
     "browseClaudeSessions": "Browse your Claude Code sessions",
     "noProjectsFound": "No projects found in ~/.claude/projects",

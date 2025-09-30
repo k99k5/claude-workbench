@@ -2479,12 +2479,8 @@ fn calculate_usage_cost(
             (15.0, 75.0, 18.75, 1.125), // Opus 4 pricing
         m if m.contains("sonnet-4") || m.contains("claude-sonnet-4") =>
             (3.0, 15.0, 3.75, 0.225),   // Sonnet 4 pricing
-        m if m.contains("haiku-4") || m.contains("claude-haiku-4") =>
-            (0.25, 1.25, 0.3125, 0.01875), // Haiku 4 pricing
         m if m.contains("sonnet-3.5") || m.contains("claude-3-5-sonnet") =>
             (3.0, 15.0, 3.75, 0.225),   // Sonnet 3.5 pricing
-        m if m.contains("haiku-3.5") || m.contains("claude-3-5-haiku") =>
-            (0.25, 1.25, 0.3125, 0.01875), // Haiku 3.5 pricing
         _ => (0.0, 0.0, 0.0, 0.0), // Unknown model
     };
 

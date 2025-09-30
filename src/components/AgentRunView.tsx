@@ -335,7 +335,7 @@ export const AgentRunView: React.FC<AgentRunViewProps> = ({
                 <h3 className="text-sm font-medium">任务：</h3>
                 <p className="text-sm text-muted-foreground flex-1">{run.task}</p>
                 <Badge variant="outline" className="text-xs">
-                  {run.model === 'opus' ? 'Claude 4.1 Opus' : 'Claude 4 Sonnet'}
+                  {run.model === 'opus' ? 'Claude 4.1 Opus' : 'Claude 4.5 Sonnet'}
                 </Badge>
               </div>
               

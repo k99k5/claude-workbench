@@ -319,7 +319,7 @@ export function AgentRunOutputViewer({
   const handleCopyAsMarkdown = async () => {
     let markdown = `# Agent Execution: ${run.agent_name}\n\n`;
     markdown += `**Task:** ${run.task}\n`;
-    markdown += `**Model:** ${run.model === 'opus' ? 'Claude 4.1 Opus' : 'Claude 4 Sonnet'}\n`;
+    markdown += `**Model:** ${run.model === 'opus' ? 'Claude 4.1 Opus' : 'Claude 4.5 Sonnet'}\n`;
     markdown += `**Date:** ${formatISOTimestamp(run.created_at)}\n`;
     if (run.metrics?.duration_ms) markdown += `**Duration:** ${(run.metrics.duration_ms / 1000).toFixed(2)}s\n`;
     if (run.metrics?.total_tokens) markdown += `**Total Tokens:** ${run.metrics.total_tokens}\n`;
@@ -556,7 +556,7 @@ export function AgentRunOutputViewer({
                   </p>
                   <div className="flex items-center gap-3 text-xs text-muted-foreground mt-2">
                     <Badge variant="outline" className="text-xs">
-                      {run.model === 'opus' ? 'Claude 4.1 Opus' : 'Claude 4 Sonnet'}
+                      {run.model === 'opus' ? 'Claude 4.1 Opus' : 'Claude 4.5 Sonnet'}
                     </Badge>
                     <div className="flex items-center gap-1">
                       <Clock className="h-3 w-3" />

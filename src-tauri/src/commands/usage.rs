@@ -196,11 +196,6 @@ const SONNET_35_OUTPUT_PRICE: f64 = 15.0;
 const SONNET_35_CACHE_WRITE_PRICE: f64 = 3.75;
 const SONNET_35_CACHE_READ_PRICE: f64 = 0.30;
 
-const HAIKU_35_INPUT_PRICE: f64 = 0.80;
-const HAIKU_35_OUTPUT_PRICE: f64 = 4.0;
-const HAIKU_35_CACHE_WRITE_PRICE: f64 = 1.0;
-const HAIKU_35_CACHE_READ_PRICE: f64 = 0.08;
-
 // Claude Code session window duration (5 hours)
 const SESSION_WINDOW_HOURS: i64 = 5;
 
@@ -300,13 +295,6 @@ fn calculate_cost(model: &str, usage: &UsageData) -> f64 {
                 SONNET_35_OUTPUT_PRICE,
                 SONNET_35_CACHE_WRITE_PRICE,
                 SONNET_35_CACHE_READ_PRICE,
-            )
-        } else if model.contains("haiku-3.5") || model.contains("claude-haiku-3.5") {
-            (
-                HAIKU_35_INPUT_PRICE,
-                HAIKU_35_OUTPUT_PRICE,
-                HAIKU_35_CACHE_WRITE_PRICE,
-                HAIKU_35_CACHE_READ_PRICE,
             )
         } else {
             // Return 0 for unknown models to avoid incorrect cost estimations (旧版本逻辑)
@@ -623,16 +611,14 @@ fn parse_jsonl_file_fast(
 // 优化的成本计算函数
 fn calculate_cost_fast(model: &str, input_tokens: u64, output_tokens: u64, cache_creation_tokens: u64, cache_read_tokens: u64) -> f64 {
     let (input_price, output_price, cache_write_price, cache_read_price) = match model {
-        m if m.contains("opus-4") || m.contains("claude-opus-4") => 
+        m if m.contains("opus-4") || m.contains("claude-opus-4") =>
             (OPUS_4_INPUT_PRICE, OPUS_4_OUTPUT_PRICE, OPUS_4_CACHE_WRITE_PRICE, OPUS_4_CACHE_READ_PRICE),
-        m if m.contains("sonnet-4") || m.contains("claude-sonnet-4") => 
+        m if m.contains("sonnet-4") || m.contains("claude-sonnet-4") =>
             (SONNET_4_INPUT_PRICE, SONNET_4_OUTPUT_PRICE, SONNET_4_CACHE_WRITE_PRICE, SONNET_4_CACHE_READ_PRICE),
-        m if m.contains("sonnet-3.7") || m.contains("claude-sonnet-3.7") => 
+        m if m.contains("sonnet-3.7") || m.contains("claude-sonnet-3.7") =>
             (SONNET_37_INPUT_PRICE, SONNET_37_OUTPUT_PRICE, SONNET_37_CACHE_WRITE_PRICE, SONNET_37_CACHE_READ_PRICE),
-        m if m.contains("sonnet-3.5") || m.contains("claude-sonnet-3.5") => 
+        m if m.contains("sonnet-3.5") || m.contains("claude-sonnet-3.5") =>
             (SONNET_35_INPUT_PRICE, SONNET_35_OUTPUT_PRICE, SONNET_35_CACHE_WRITE_PRICE, SONNET_35_CACHE_READ_PRICE),
-        m if m.contains("haiku-3.5") || m.contains("claude-haiku-3.5") => 
-            (HAIKU_35_INPUT_PRICE, HAIKU_35_OUTPUT_PRICE, HAIKU_35_CACHE_WRITE_PRICE, HAIKU_35_CACHE_READ_PRICE),
         _ => (0.0, 0.0, 0.0, 0.0),
     };
 
@@ -942,6 +928,7 @@ fn calculate_usage_stats_fast(filtered_entries: &[UsageEntry]) -> UsageStats {
 }
 
 // 分页统计数据结构
+#[allow(dead_code)]
 #[derive(Debug, Serialize)]
 pub struct PaginatedUsageStats {
     total_cost: f64,
@@ -958,6 +945,7 @@ pub struct PaginatedUsageStats {
     by_date: Vec<DailyUsage>, // 日期数据通常不多，不需要分页
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Serialize)]
 pub struct PaginatedData<T> {
     data: Vec<T>,

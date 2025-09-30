@@ -125,9 +125,8 @@
     "failed": "失败",
     "cancelled": "已取消",
     "model": {
-      "claude35Sonnet": "Claude 3.5 Sonnet",
-      "claude35Haiku": "Claude 3.5 Haiku",
-      "claude3Opus": "Claude 3 Opus"
+      "claude45Sonnet": "Claude 4.5 Sonnet",
+      "claude41Opus": "Claude 4.1 Opus"
     }
   },
   "timeline": {
@@ -221,6 +220,7 @@
   },
   "common": {
     "backToHome": "← 返回主页",
+    "newProject": "新建项目",
     "newClaudeSession": "新建 Claude Code 会话",
     "browseClaudeSessions": "浏览您的 Claude Code 会话",
     "noProjectsFound": "在 ~/.claude/projects 中未找到项目",
@@ -247,8 +247,8 @@
     "agentName": "智能体名称",
     "agentIcon": "智能体图标",
     "model": "模型",
-    "claude4Sonnet": "Claude 4 Sonnet",
-    "claude4Opus": "Claude 4.1 Opus",
+    "claude45Sonnet": "Claude 4.5 Sonnet",
+    "claude41Opus": "Claude 4.1 Opus",
     "fasterEfficient": "更快，适用于大多数任务",
     "moreCapable": "更强大，适用于复杂任务",
     "defaultTaskOptional": "默认任务（可选）",

@@ -79,12 +79,6 @@ export const CLAUDE_PRICING = {
     cache_write: 3.75,
     cache_read: 0.30,
   },
-  'claude-3-haiku-20240307': {
-    input: 0.25,
-    output: 1.25,
-    cache_write: 0.30,
-    cache_read: 0.03,
-  },
   // 默认值
   'default': {
     input: 3.0,
@@ -99,14 +93,9 @@ export const MODEL_ALIASES = {
   'opus': 'claude-opus-4',
   'opus4': 'claude-opus-4',
   'opus-4': 'claude-opus-4',
-  'sonnet': 'claude-3-5-sonnet-20241022',
+  'sonnet': 'claude-sonnet-4',
   'sonnet4': 'claude-sonnet-4',
   'sonnet-4': 'claude-sonnet-4',
-  'sonnet3.5': 'claude-3-5-sonnet-20241022',
-  'sonnet-3.5': 'claude-3-5-sonnet-20241022',
-  'haiku': 'claude-3-5-haiku-20241022',
-  'haiku3.5': 'claude-haiku-3.5',
-  'haiku-3.5': 'claude-haiku-3.5',
 } as const;
 
 // Token使用统计接口
@@ -256,7 +245,6 @@ export class TokenCounterService {
     if (model.includes('sonnet') && model.includes('4')) return 'claude-sonnet-4';
     if (model.includes('sonnet') && model.includes('3.7')) return 'claude-sonnet-3.7';
     if (model.includes('sonnet')) return 'claude-3-5-sonnet-20241022';
-    if (model.includes('haiku')) return 'claude-3-5-haiku-20241022';
 
     return model; // 返回原始名称
   }

@@ -161,13 +161,13 @@ type Model = {
 const MODELS: Model[] = [
   {
     id: "sonnet",
-    name: "Claude 4 Sonnet",
+    name: "Claude 4.5 Sonnet",
     description: "Faster, efficient for most tasks",
     icon: <Zap className="h-4 w-4" />
   },
   {
     id: "sonnet1m",
-    name: "Claude 4 Sonnet 1M",
+    name: "Claude 4.5 Sonnet 1M",
     description: "Sonnet with 1 million token context",
     icon: <Brain className="h-4 w-4" />
   },
