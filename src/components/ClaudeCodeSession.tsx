@@ -10,7 +10,8 @@ import {
   ChevronUp,
   X,
   Command,
-  DollarSign
+  DollarSign,
+  Clock
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,7 +23,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { api, type Session } from "@/lib/api";
+import { api, type Session, type Project } from "@/lib/api";
 import { cn, normalizeUsageData } from "@/lib/utils";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -89,6 +90,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   isActive = true, // 默认为活跃状态，保持向后兼容
 }) => {
   const [projectPath, setProjectPath] = useState(initialProjectPath || session?.project_path || "");
+  const [recentProjects, setRecentProjects] = useState<Project[]>([]);
   const [messages, setMessages] = useState<ClaudeStreamMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -299,6 +301,24 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     });
   }, [projectPath, session, extractedSessionInfo, effectiveSession, messages.length, isLoading]);
 
+  // Load recent projects when component mounts (only for new sessions)
+  useEffect(() => {
+    if (!session && !initialProjectPath) {
+      const loadRecentProjects = async () => {
+        try {
+          const projects = await api.listProjects();
+          // Sort by created_at (latest first) and take top 5
+          const sortedProjects = projects
+            .sort((a, b) => b.created_at - a.created_at)
+            .slice(0, 5);
+          setRecentProjects(sortedProjects);
+        } catch (error) {
+          console.error("Failed to load recent projects:", error);
+        }
+      };
+      loadRecentProjects();
+    }
+  }, [session, initialProjectPath]);
 
   // Load session history if resuming
   useEffect(() => {
@@ -1972,31 +1992,102 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
 
   const projectPathInput = !session && (
     <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
+      initial={{ opacity: 0, y: -20 }}
+      animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.1 }}
-      className="p-4 border-b border-border flex-shrink-0"
+      className="p-6 border-b border-border flex-shrink-0 bg-muted/20"
     >
-      <Label htmlFor="project-path" className="text-sm font-medium">
-        项目目录
-      </Label>
-      <div className="flex items-center gap-2 mt-1">
-        <Input
-          id="project-path"
-          value={projectPath}
-          onChange={(e) => setProjectPath(e.target.value)}
-          placeholder="/path/to/your/project"
-          className="flex-1"
-          disabled={isLoading}
-        />
-        <Button
-          onClick={handleSelectPath}
-          size="icon"
-          variant="outline"
-          disabled={isLoading}
-        >
-          <FolderOpen className="h-4 w-4" />
-        </Button>
+      {/* Header section */}
+      <div className="max-w-3xl mx-auto space-y-4">
+        {!projectPath && (
+          <div className="text-center mb-6">
+            <FolderOpen className="h-12 w-12 mx-auto mb-3 text-muted-foreground" />
+            <h3 className="text-lg font-semibold mb-2">选择项目目录</h3>
+            <p className="text-sm text-muted-foreground">
+              请选择一个项目目录来开始新的 Claude 会话
+            </p>
+          </div>
+        )}
+
+        {/* Project path input */}
+        <div className="space-y-2">
+          <Label htmlFor="project-path" className="text-sm font-medium">
+            项目路径
+          </Label>
+          <div className="flex items-center gap-2">
+            <Input
+              id="project-path"
+              value={projectPath}
+              onChange={(e) => setProjectPath(e.target.value)}
+              placeholder="输入项目路径或点击浏览按钮选择"
+              className="flex-1"
+              disabled={isLoading}
+            />
+            <Button
+              onClick={handleSelectPath}
+              variant="outline"
+              disabled={isLoading}
+              className="gap-2"
+            >
+              <FolderOpen className="h-4 w-4" />
+              浏览
+            </Button>
+          </div>
+        </div>
+
+        {/* Recent projects list */}
+        {!projectPath && recentProjects.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Clock className="h-4 w-4" />
+              <span>最近使用的项目</span>
+            </div>
+            <div className="grid gap-2">
+              {recentProjects.map((project) => (
+                <Button
+                  key={project.id}
+                  variant="outline"
+                  className="justify-start h-auto py-3 px-4"
+                  onClick={() => {
+                    setProjectPath(project.path);
+                    setError(null);
+                  }}
+                >
+                  <div className="flex flex-col items-start gap-1 flex-1 min-w-0">
+                    <div className="flex items-center gap-2 w-full">
+                      <FolderOpen className="h-4 w-4 flex-shrink-0 text-primary" />
+                      <span className="font-medium text-sm truncate">
+                        {project.path.split('/').pop() || project.path.split('\\').pop()}
+                      </span>
+                    </div>
+                    <span className="text-xs text-muted-foreground truncate w-full">
+                      {project.path}
+                    </span>
+                  </div>
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Selected project confirmation */}
+        {projectPath && (
+          <div className="flex items-center gap-2 p-3 bg-primary/10 border border-primary/20 rounded-md">
+            <FolderOpen className="h-4 w-4 text-primary flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">已选择项目</p>
+              <p className="text-xs text-muted-foreground truncate">{projectPath}</p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setProjectPath("")}
+              disabled={isLoading}
+            >
+              更改
+            </Button>
+          </div>
+        )}
       </div>
     </motion.div>
   );

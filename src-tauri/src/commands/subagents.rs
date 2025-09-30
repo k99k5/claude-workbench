@@ -51,6 +51,7 @@ impl SpecialtyType {
 }
 
 /// 专业化配置
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpecialtyConfig {
     /// 允许的工具列表
@@ -64,6 +65,7 @@ pub struct SpecialtyConfig {
 }
 
 /// 触发条件
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TriggerCondition {
     pub event_type: String, // "file_change", "test_failure", "security_alert"

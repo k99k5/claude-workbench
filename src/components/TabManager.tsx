@@ -57,6 +57,8 @@ export const TabManager: React.FC<TabManagerProps> = ({
   const tabsContainerRef = useRef<HTMLDivElement>(null);
   // 🔧 FIX: Track initialization to prevent auto-creation after user closes all tabs
   const hasInitializedRef = useRef(false);
+  // 🔧 NEW: Track what we initialized with to prevent duplicate creation
+  const initializedWithRef = useRef<{ session?: string; path?: string }>({});
 
   // 拖拽处理
   const handleTabDragStart = useCallback((tabId: string) => {
@@ -67,37 +69,73 @@ export const TabManager: React.FC<TabManagerProps> = ({
     setDraggedTab(null);
   }, []);
 
-  // 🔧 FIX: 只在真正的初始化时创建标签页，避免用户关闭所有标签页后自动创建
+  // 🔧 FIX: 只在真正的初始化时创建标签页，避免重复创建
   useEffect(() => {
-    // 只在首次初始化且没有现有标签页时创建
-    if (!hasInitializedRef.current && tabs.length === 0) {
-      console.log('[TabManager] Initial setup - checking if tab creation is needed');
+    // 检查是否已经初始化过
+    if (hasInitializedRef.current) {
+      console.log('[TabManager] Already initialized, skipping');
+      return;
+    }
 
-      // 如果有初始会话，使用它创建标签页
-      if (initialSession) {
-        console.log('[TabManager] Creating tab for initial session');
-        createNewTab(initialSession);
-      }
-      // 如果有初始项目路径，使用它创建标签页
-      else if (initialProjectPath) {
-        console.log('[TabManager] Creating tab for initial project path');
-        createNewTab(undefined, initialProjectPath);
-      }
-      // 🔧 IMPROVED: 不再自动创建默认标签页，让用户主动选择
-      else {
-        console.log('[TabManager] No initial session or path - showing empty state');
+    // 检查是否已经有标签页了
+    if (tabs.length > 0) {
+      console.log('[TabManager] Tabs already exist, skipping initialization');
+      hasInitializedRef.current = true;
+      return;
+    }
+
+    console.log('[TabManager] Initial setup - checking if tab creation is needed');
+
+    // 如果有初始会话，检查是否已经为这个会话创建过
+    if (initialSession) {
+      const sessionId = initialSession.id;
+      if (initializedWithRef.current.session === sessionId) {
+        console.log('[TabManager] Already created tab for this session, skipping');
+        return;
       }
 
+      // 检查是否已经存在这个会话的标签页
+      const existingTab = tabs.find(tab => tab.session?.id === sessionId);
+      if (existingTab) {
+        console.log('[TabManager] Tab for this session already exists, skipping');
+        hasInitializedRef.current = true;
+        return;
+      }
+
+      console.log('[TabManager] Creating tab for initial session');
+      createNewTab(initialSession);
+      initializedWithRef.current.session = sessionId;
       hasInitializedRef.current = true;
     }
-  }, [createNewTab, initialSession, initialProjectPath]); // 🔧 移除tabs.length依赖
+    // 如果有初始项目路径，检查是否已经为这个路径创建过
+    else if (initialProjectPath) {
+      if (initializedWithRef.current.path === initialProjectPath) {
+        console.log('[TabManager] Already created tab for this path, skipping');
+        return;
+      }
 
-  // 🔧 NEW: Reset initialization flag when component unmounts
-  useEffect(() => {
-    return () => {
-      hasInitializedRef.current = false;
-    };
-  }, []);
+      // 检查是否已经存在这个路径的标签页
+      const existingTab = tabs.find(tab => tab.projectPath === initialProjectPath);
+      if (existingTab) {
+        console.log('[TabManager] Tab for this path already exists, skipping');
+        hasInitializedRef.current = true;
+        return;
+      }
+
+      console.log('[TabManager] Creating tab for initial project path');
+      createNewTab(undefined, initialProjectPath);
+      initializedWithRef.current.path = initialProjectPath;
+      hasInitializedRef.current = true;
+    }
+    // 🔧 IMPROVED: 不再自动创建默认标签页，让用户主动选择
+    else {
+      console.log('[TabManager] No initial session or path - showing empty state');
+      hasInitializedRef.current = true;
+    }
+  }, [tabs, createNewTab, initialSession, initialProjectPath]);
+
+  // 🔧 REMOVED: 不再在卸载时重置 flag，避免重复创建
+  // 现在依赖 initializedWithRef 来跟踪具体的初始化内容
 
   return (
     <TooltipProvider>

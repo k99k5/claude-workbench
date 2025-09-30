@@ -167,10 +167,10 @@ function AppContent() {
   };
 
   /**
-   * 在交互式界面中打开新的 Claude Code 会话
-   * Opens a new Claude Code session in the interactive UI
+   * 在主页打开新项目会话（需要选择项目路径）
+   * Opens a new project session from home page (requires project path selection)
    */
-  const handleNewSession = async () => {
+  const handleNewProject = async () => {
     handleViewChange("claude-tab-manager");
     setSelectedSession(null);
   };
@@ -505,12 +505,12 @@ function AppContent() {
                         className="mb-4"
                       >
                         <Button
-                          onClick={handleNewSession}
+                          onClick={handleNewProject}
                           size="default"
                           className="w-full max-w-md"
                         >
                           <Plus className="mr-2 h-4 w-4" />
-                          {t('common.newClaudeSession')}
+                          {t('common.newProject')}
                         </Button>
                       </motion.div>
 
