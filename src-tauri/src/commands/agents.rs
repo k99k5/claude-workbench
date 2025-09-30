@@ -1594,18 +1594,27 @@ pub async fn cleanup_finished_processes(db: State<'_, AgentDb>) -> Result<Vec<i6
         // Check if the process is still running
         let is_running = if cfg!(target_os = "windows") {
             // On Windows, use tasklist to check if process exists
-            use std::os::windows::process::CommandExt;
-            match std::process::Command::new("tasklist")
-                .args(["/FI", &format!("PID eq {}", pid)])
-                .args(["/FO", "CSV"])
-                .creation_flags(0x08000000) // CREATE_NO_WINDOW
-                .output()
+            #[cfg(target_os = "windows")]
             {
-                Ok(output) => {
-                    let output_str = String::from_utf8_lossy(&output.stdout);
-                    output_str.lines().count() > 1 // Header + process line if exists
+                use std::os::windows::process::CommandExt;
+                match std::process::Command::new("tasklist")
+                    .args(["/FI", &format!("PID eq {}", pid)])
+                    .args(["/FO", "CSV"])
+                    .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                    .output()
+                {
+                    Ok(output) => {
+                        let output_str = String::from_utf8_lossy(&output.stdout);
+                        output_str.lines().count() > 1 // Header + process line if exists
+                    }
+                    Err(_) => false,
                 }
-                Err(_) => false,
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                // This branch will never be reached due to the outer if condition
+                // but is needed for compilation on non-Windows platforms
+                false
             }
         } else {
             // On Unix-like systems, use kill -0 to check if process exists

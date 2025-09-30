@@ -387,7 +387,7 @@ fn escape_prompt_for_cli(prompt: &str) -> String {
             cleaned
         } else {
             // For Unix-like systems, escape shell metacharacters
-            let mut escaped = prompt
+            let escaped = prompt
                 .replace('\\', "\\\\")  // Backslashes first
                 .replace('\n', "\\n")   // Newlines
                 .replace('\r', "\\r")   // Carriage returns
@@ -1735,10 +1735,22 @@ pub async fn cancel_claude_execution(
                     if let Some(pid) = pid {
                         log::info!("Attempting system kill as last resort for PID: {}", pid);
                         let kill_result = if cfg!(target_os = "windows") {
-                                                std::process::Command::new("taskkill")
-                                .args(["/F", "/PID", &pid.to_string()])
-                                .creation_flags(0x08000000) // CREATE_NO_WINDOW
-                                .output()
+                            #[cfg(target_os = "windows")]
+                            {
+                                use std::os::windows::process::CommandExt;
+                                std::process::Command::new("taskkill")
+                                    .args(["/F", "/PID", &pid.to_string()])
+                                    .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                                    .output()
+                            }
+                            #[cfg(not(target_os = "windows"))]
+                            {
+                                // This branch will never be reached due to the outer if condition
+                                // but is needed for compilation on non-Windows platforms
+                                std::process::Command::new("kill")
+                                    .args(["-KILL", &pid.to_string()])
+                                    .output()
+                            }
                         } else {
                             std::process::Command::new("kill")
                                 .args(["-KILL", &pid.to_string()])
