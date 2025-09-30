@@ -265,14 +265,14 @@ export const TranslationSettings: React.FC<TranslationSettingsProps> = ({ onClos
           </div>
 
           <div className="flex space-x-2 pt-4">
-            <Button 
-              onClick={handleSave} 
-              disabled={saving || !config.api_key.trim()}
+            <Button
+              onClick={handleSave}
+              disabled={saving}
             >
               {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               保存配置
             </Button>
-            
+
             <Button
               variant="outline"
               onClick={handleTestConnection}

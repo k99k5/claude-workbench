@@ -29,9 +29,9 @@ pub struct TranslationConfig {
 impl Default for TranslationConfig {
     fn default() -> Self {
         Self {
-            enabled: true,  // 🔧 修复：默认启用翻译功能
+            enabled: false,  // 🔧 修复：默认禁用翻译功能，需用户配置API密钥后启用
             api_base_url: "https://api.siliconflow.cn/v1".to_string(),
-            api_key: "sk-ednywbvnfwerfcxnqjkmnhxvgcqoyuhmjvfywrshpxsgjbzm".to_string(), // 🔧 修复：使用预配置的API密钥
+            api_key: String::new(), // 🔧 修复：要求用户自定义输入API密钥
             model: "tencent/Hunyuan-MT-7B".to_string(),
             timeout_seconds: 30,
             cache_ttl_seconds: 3600, // 1小时
