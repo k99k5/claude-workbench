@@ -6,6 +6,7 @@ mod claude_binary;
 mod commands;
 mod process;
 
+use std::sync::Arc;
 use checkpoint::state::CheckpointState;
 use commands::agents::{
     cleanup_finished_processes, create_agent, delete_agent, execute_agent, export_agent,
@@ -18,7 +19,7 @@ use commands::agents::{
 };
 use commands::claude::{
     cancel_claude_execution, check_auto_checkpoint, check_claude_version, cleanup_old_checkpoints,
-    clear_checkpoint_manager, continue_claude_code, create_checkpoint, delete_project, execute_claude_code,
+    cleanup_old_checkpoints_by_age, clear_checkpoint_manager, continue_claude_code, create_checkpoint, delete_project, execute_claude_code,
     find_claude_md_files, fork_from_checkpoint, get_checkpoint_diff, get_checkpoint_settings,
     get_checkpoint_state_stats, get_claude_session_output, get_claude_settings, get_project_sessions,
     get_recently_modified_files, get_session_timeline, get_system_prompt, list_checkpoints,
@@ -121,6 +122,20 @@ fn main() {
             // Initialize Claude process state
             app.manage(ClaudeProcessState::default());
 
+            // Initialize auto-compact manager for context management
+            let auto_compact_manager = Arc::new(commands::context_manager::AutoCompactManager::new());
+            let app_handle_for_monitor = app.handle().clone();
+            let manager_for_monitor = auto_compact_manager.clone();
+
+            // Start monitoring in background
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = manager_for_monitor.start_monitoring(app_handle_for_monitor).await {
+                    log::error!("Failed to start auto-compact monitoring: {}", e);
+                }
+            });
+
+            app.manage(commands::context_manager::AutoCompactState(auto_compact_manager));
+
             // Initialize translation service with saved configuration
             tauri::async_runtime::spawn(async move {
                 commands::translator::init_translation_service_with_saved_config().await;
@@ -186,6 +201,7 @@ fn main() {
             track_session_messages,
             check_auto_checkpoint,
             cleanup_old_checkpoints,
+            cleanup_old_checkpoints_by_age,
             get_checkpoint_settings,
             clear_checkpoint_manager,
             get_checkpoint_state_stats,

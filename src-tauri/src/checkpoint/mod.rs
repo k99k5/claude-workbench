@@ -170,6 +170,24 @@ pub struct FileDiff {
     pub diff_content: Option<String>,
 }
 
+/// Strategy for restoring a checkpoint
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RestoreMode {
+    /// Only restore conversation messages, keep current code
+    ConversationOnly,
+    /// Only restore code files, keep current conversation
+    CodeOnly,
+    /// Restore both conversation and code (full restore)
+    Both,
+}
+
+impl Default for RestoreMode {
+    fn default() -> Self {
+        RestoreMode::Both
+    }
+}
+
 impl Default for CheckpointStrategy {
     fn default() -> Self {
         CheckpointStrategy::Smart
@@ -183,7 +201,7 @@ impl SessionTimeline {
             session_id,
             root_node: None,
             current_checkpoint_id: None,
-            auto_checkpoint_enabled: false,
+            auto_checkpoint_enabled: true,  // Default to enabled per Claude Code best practices
             checkpoint_strategy: CheckpointStrategy::default(),
             total_checkpoints: 0,
         }

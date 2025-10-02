@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 use super::{
     storage::{self, CheckpointStorage},
     Checkpoint, CheckpointMetadata, CheckpointPaths, CheckpointResult, CheckpointStrategy,
-    FileSnapshot, FileState, FileTracker, SessionTimeline,
+    FileSnapshot, FileState, FileTracker, RestoreMode, SessionTimeline,
 };
 
 /// Manages checkpoint operations for a session
@@ -449,59 +449,94 @@ impl CheckpointManager {
         Ok(snapshots)
     }
 
-    /// Restore a checkpoint
-    pub async fn restore_checkpoint(&self, checkpoint_id: &str) -> Result<CheckpointResult> {
+    /// Restore a checkpoint with specified mode
+    pub async fn restore_checkpoint_with_mode(
+        &self,
+        checkpoint_id: &str,
+        mode: RestoreMode,
+    ) -> Result<CheckpointResult> {
         // Load checkpoint data
         let (checkpoint, file_snapshots, messages) =
             self.storage
                 .load_checkpoint(&self.project_id, &self.session_id, checkpoint_id)?;
 
-        // First, collect all files currently in the project to handle deletions
-        fn collect_all_project_files(
-            dir: &std::path::Path,
-            base: &std::path::Path,
-            files: &mut Vec<std::path::PathBuf>,
-        ) -> Result<(), std::io::Error> {
-            for entry in std::fs::read_dir(dir)? {
-                let entry = entry?;
-                let path = entry.path();
-                if path.is_dir() {
-                    // Skip hidden directories like .git
-                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                        if name.starts_with('.') {
-                            continue;
-                        }
-                    }
-                    collect_all_project_files(&path, base, files)?;
-                } else if path.is_file() {
-                    // Compute relative path from project root
-                    if let Ok(rel) = path.strip_prefix(base) {
-                        files.push(rel.to_path_buf());
-                    }
-                }
+        let mut warnings = Vec::new();
+        let mut files_processed = 0;
+
+        // Execute restore based on mode
+        match mode {
+            RestoreMode::ConversationOnly => {
+                log::info!("Restoring conversation only for checkpoint: {}", checkpoint_id);
+                // Only restore messages, keep current code
+                self.restore_messages_only(&messages).await?;
             }
-            Ok(())
+            RestoreMode::CodeOnly => {
+                log::info!("Restoring code only for checkpoint: {}", checkpoint_id);
+                // Only restore files, keep current conversation
+                let result = self.restore_files_only(&file_snapshots).await?;
+                files_processed = result.0;
+                warnings = result.1;
+            }
+            RestoreMode::Both => {
+                log::info!("Restoring both code and conversation for checkpoint: {}", checkpoint_id);
+                // Full restore (existing logic)
+                let result = self.restore_full(&file_snapshots, &messages).await?;
+                files_processed = result.0;
+                warnings = result.1;
+            }
         }
 
+        // Update timeline
+        let mut timeline = self.timeline.write().await;
+        timeline.current_checkpoint_id = Some(checkpoint_id.to_string());
+
+        Ok(CheckpointResult {
+            checkpoint: checkpoint.clone(),
+            files_processed,
+            warnings,
+        })
+    }
+
+    /// Restore only conversation messages
+    async fn restore_messages_only(&self, messages: &str) -> Result<()> {
+        // Update current messages
+        let mut current_messages = self.current_messages.write().await;
+        current_messages.clear();
+        for line in messages.lines() {
+            current_messages.push(line.to_string());
+        }
+
+        log::info!("Restored {} messages", current_messages.len());
+        Ok(())
+    }
+
+    /// Restore only code files
+    async fn restore_files_only(
+        &self,
+        file_snapshots: &[FileSnapshot],
+    ) -> Result<(usize, Vec<String>)> {
+        let mut warnings = Vec::new();
+        let mut files_processed = 0;
+
+        // First, collect all files currently in the project
         let mut current_files = Vec::new();
-        let _ =
-            collect_all_project_files(&self.project_path, &self.project_path, &mut current_files);
+        let _ = Self::collect_all_project_files(
+            &self.project_path,
+            &self.project_path,
+            &mut current_files,
+        );
 
         // Create a set of files that should exist after restore
         let mut checkpoint_files = std::collections::HashSet::new();
-        for snapshot in &file_snapshots {
+        for snapshot in file_snapshots {
             if !snapshot.is_deleted {
                 checkpoint_files.insert(snapshot.file_path.clone());
             }
         }
 
         // Delete files that exist now but shouldn't exist in the checkpoint
-        let mut warnings = Vec::new();
-        let mut files_processed = 0;
-
         for current_file in current_files {
             if !checkpoint_files.contains(&current_file) {
-                // This file exists now but not in the checkpoint, so delete it
                 let full_path = self.project_path.join(&current_file);
                 match fs::remove_file(&full_path) {
                     Ok(_) => {
@@ -520,40 +555,10 @@ impl CheckpointManager {
         }
 
         // Clean up empty directories
-        fn remove_empty_dirs(
-            dir: &std::path::Path,
-            base: &std::path::Path,
-        ) -> Result<bool, std::io::Error> {
-            if dir == base {
-                return Ok(false); // Don't remove the base directory
-            }
-
-            let mut is_empty = true;
-            for entry in fs::read_dir(dir)? {
-                let entry = entry?;
-                let path = entry.path();
-                if path.is_dir() {
-                    if !remove_empty_dirs(&path, base)? {
-                        is_empty = false;
-                    }
-                } else {
-                    is_empty = false;
-                }
-            }
-
-            if is_empty {
-                fs::remove_dir(dir)?;
-                Ok(true)
-            } else {
-                Ok(false)
-            }
-        }
-
-        // Clean up any empty directories left after file deletion
-        let _ = remove_empty_dirs(&self.project_path, &self.project_path);
+        let _ = Self::remove_empty_dirs(&self.project_path, &self.project_path);
 
         // Restore files from checkpoint
-        for snapshot in &file_snapshots {
+        for snapshot in file_snapshots {
             match self.restore_file_snapshot(snapshot).await {
                 Ok(_) => files_processed += 1,
                 Err(e) => warnings.push(format!(
@@ -564,21 +569,10 @@ impl CheckpointManager {
             }
         }
 
-        // Update current messages
-        let mut current_messages = self.current_messages.write().await;
-        current_messages.clear();
-        for line in messages.lines() {
-            current_messages.push(line.to_string());
-        }
-
-        // Update timeline
-        let mut timeline = self.timeline.write().await;
-        timeline.current_checkpoint_id = Some(checkpoint_id.to_string());
-
         // Update file tracker
         let mut tracker = self.file_tracker.write().await;
         tracker.tracked_files.clear();
-        for snapshot in &file_snapshots {
+        for snapshot in file_snapshots {
             if !snapshot.is_deleted {
                 tracker.tracked_files.insert(
                     snapshot.file_path.clone(),
@@ -592,11 +586,86 @@ impl CheckpointManager {
             }
         }
 
-        Ok(CheckpointResult {
-            checkpoint: checkpoint.clone(),
-            files_processed,
-            warnings,
-        })
+        log::info!("Restored {} files", files_processed);
+        Ok((files_processed, warnings))
+    }
+
+    /// Restore both code and conversation (full restore)
+    async fn restore_full(
+        &self,
+        file_snapshots: &[FileSnapshot],
+        messages: &str,
+    ) -> Result<(usize, Vec<String>)> {
+        // Restore files first
+        let (files_processed, warnings) = self.restore_files_only(file_snapshots).await?;
+
+        // Then restore messages
+        self.restore_messages_only(messages).await?;
+
+        Ok((files_processed, warnings))
+    }
+
+    /// Helper: Collect all project files (made static for reuse)
+    fn collect_all_project_files(
+        dir: &std::path::Path,
+        base: &std::path::Path,
+        files: &mut Vec<std::path::PathBuf>,
+    ) -> Result<(), std::io::Error> {
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                // Skip hidden directories like .git
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.starts_with('.') {
+                        continue;
+                    }
+                }
+                Self::collect_all_project_files(&path, base, files)?;
+            } else if path.is_file() {
+                // Compute relative path from project root
+                if let Ok(rel) = path.strip_prefix(base) {
+                    files.push(rel.to_path_buf());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Helper: Remove empty directories (made static for reuse)
+    fn remove_empty_dirs(
+        dir: &std::path::Path,
+        base: &std::path::Path,
+    ) -> Result<bool, std::io::Error> {
+        if dir == base {
+            return Ok(false); // Don't remove the base directory
+        }
+
+        let mut is_empty = true;
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                if !Self::remove_empty_dirs(&path, base)? {
+                    is_empty = false;
+                }
+            } else {
+                is_empty = false;
+            }
+        }
+
+        if is_empty {
+            fs::remove_dir(dir)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Restore a checkpoint (backward compatibility - defaults to Both mode)
+    pub async fn restore_checkpoint(&self, checkpoint_id: &str) -> Result<CheckpointResult> {
+        self.restore_checkpoint_with_mode(checkpoint_id, RestoreMode::Both)
+            .await
     }
 
     /// Restore a single file from snapshot

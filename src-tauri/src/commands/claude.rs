@@ -2343,11 +2343,25 @@ pub async fn restore_checkpoint(
     session_id: String,
     project_id: String,
     project_path: String,
+    restore_mode: Option<String>,
 ) -> Result<crate::checkpoint::CheckpointResult, String> {
+    use crate::checkpoint::RestoreMode;
+
+    // Parse restore mode from string (defaults to Both if not provided)
+    let mode = match restore_mode.as_deref() {
+        Some("conversation_only") => RestoreMode::ConversationOnly,
+        Some("code_only") => RestoreMode::CodeOnly,
+        Some("both") | None => RestoreMode::Both,
+        Some(other) => {
+            return Err(format!("Invalid restore mode: {}. Valid values are: conversation_only, code_only, both", other));
+        }
+    };
+
     log::info!(
-        "Restoring checkpoint: {} for session: {}",
+        "Restoring checkpoint: {} for session: {} with mode: {:?}",
         checkpoint_id,
-        session_id
+        session_id,
+        mode
     );
 
     let manager = app
@@ -2360,26 +2374,29 @@ pub async fn restore_checkpoint(
         .map_err(|e| format!("Failed to get checkpoint manager: {}", e))?;
 
     let result = manager
-        .restore_checkpoint(&checkpoint_id)
+        .restore_checkpoint_with_mode(&checkpoint_id, mode.clone())
         .await
         .map_err(|e| format!("Failed to restore checkpoint: {}", e))?;
 
     // Update the session JSONL file with restored messages
-    let claude_dir = get_claude_dir().map_err(|e| e.to_string())?;
-    let session_path = claude_dir
-        .join("projects")
-        .join(&result.checkpoint.project_id)
-        .join(format!("{}.jsonl", session_id));
+    // Only do this if we're restoring conversation (ConversationOnly or Both)
+    if matches!(mode, RestoreMode::ConversationOnly | RestoreMode::Both) {
+        let claude_dir = get_claude_dir().map_err(|e| e.to_string())?;
+        let session_path = claude_dir
+            .join("projects")
+            .join(&result.checkpoint.project_id)
+            .join(format!("{}.jsonl", session_id));
 
-    // The manager has already restored the messages internally,
-    // but we need to update the actual session file
-    let (_, _, messages) = manager
-        .storage
-        .load_checkpoint(&result.checkpoint.project_id, &session_id, &checkpoint_id)
-        .map_err(|e| format!("Failed to load checkpoint data: {}", e))?;
+        // The manager has already restored the messages internally,
+        // but we need to update the actual session file
+        let (_, _, messages) = manager
+            .storage
+            .load_checkpoint(&result.checkpoint.project_id, &session_id, &checkpoint_id)
+            .map_err(|e| format!("Failed to load checkpoint data: {}", e))?;
 
-    fs::write(&session_path, messages)
-        .map_err(|e| format!("Failed to update session file: {}", e))?;
+        fs::write(&session_path, messages)
+            .map_err(|e| format!("Failed to update session file: {}", e))?;
+    }
 
     Ok(result)
 }
@@ -2672,6 +2689,37 @@ pub async fn cleanup_old_checkpoints(
         .storage
         .cleanup_old_checkpoints(&project_id, &session_id, keep_count)
         .map_err(|e| format!("Failed to cleanup checkpoints: {}", e))
+}
+
+/// Cleanup checkpoints older than specified days (default: 30 days)
+#[tauri::command]
+pub async fn cleanup_old_checkpoints_by_age(
+    app: tauri::State<'_, crate::checkpoint::state::CheckpointState>,
+    session_id: String,
+    project_id: String,
+    project_path: String,
+    days: Option<u64>,
+) -> Result<usize, String> {
+    let days = days.unwrap_or(30); // Default to 30 days per Claude Code docs
+    log::info!(
+        "Cleaning up checkpoints older than {} days for session: {}",
+        days,
+        session_id
+    );
+
+    let manager = app
+        .get_or_create_manager(
+            session_id.clone(),
+            project_id.clone(),
+            PathBuf::from(project_path),
+        )
+        .await
+        .map_err(|e| format!("Failed to get checkpoint manager: {}", e))?;
+
+    manager
+        .storage
+        .cleanup_old_checkpoints_by_age(&project_id, &session_id, days)
+        .map_err(|e| format!("Failed to cleanup checkpoints by age: {}", e))
 }
 
 /// Gets checkpoint settings for a session

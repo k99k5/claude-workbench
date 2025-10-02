@@ -377,6 +377,52 @@ impl CheckpointStorage {
         Ok(removed_count)
     }
 
+    /// Cleanup checkpoints older than the specified number of days
+    /// Returns the number of checkpoints removed
+    pub fn cleanup_old_checkpoints_by_age(
+        &self,
+        project_id: &str,
+        session_id: &str,
+        days: u64,
+    ) -> Result<usize> {
+        let paths = CheckpointPaths::new(&self.claude_dir, project_id, session_id);
+        let timeline = self.load_timeline(&paths.timeline_file)?;
+
+        // Calculate cutoff timestamp
+        let now = chrono::Utc::now();
+        let cutoff = now - chrono::Duration::days(days as i64);
+
+        // Collect all checkpoints
+        let mut all_checkpoints = Vec::new();
+        if let Some(root) = &timeline.root_node {
+            Self::collect_checkpoints(root, &mut all_checkpoints);
+        }
+
+        // Filter checkpoints older than cutoff
+        let mut removed_count = 0;
+        for checkpoint in all_checkpoints {
+            if checkpoint.timestamp < cutoff {
+                if self.remove_checkpoint(&paths, &checkpoint.id).is_ok() {
+                    removed_count += 1;
+                }
+            }
+        }
+
+        // Run garbage collection to clean up orphaned content
+        if removed_count > 0 {
+            match self.garbage_collect_content(project_id, session_id) {
+                Ok(gc_count) => {
+                    log::info!("Garbage collected {} orphaned content files", gc_count);
+                }
+                Err(e) => {
+                    log::warn!("Failed to garbage collect content: {}", e);
+                }
+            }
+        }
+
+        Ok(removed_count)
+    }
+
     /// Collect all checkpoints from the tree in order
     fn collect_checkpoints(node: &TimelineNode, checkpoints: &mut Vec<Checkpoint>) {
         checkpoints.push(node.checkpoint.clone());

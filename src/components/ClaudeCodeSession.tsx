@@ -11,7 +11,8 @@ import {
   X,
   Command,
   DollarSign,
-  Clock
+  Clock,
+  RotateCcw
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +33,7 @@ import { FloatingPromptInput, type FloatingPromptInputRef } from "./FloatingProm
 import { ErrorBoundary } from "./ErrorBoundary";
 import { TimelineNavigator } from "./TimelineNavigator";
 import { CheckpointSettings } from "./CheckpointSettings";
+import { RewindDialog } from "./RewindDialog";
 import { SlashCommandsManager } from "./SlashCommandsManager";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -104,8 +106,10 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   const [showSettings, setShowSettings] = useState(false);
   const [showForkDialog, setShowForkDialog] = useState(false);
   const [showSlashCommandsSettings, setShowSlashCommandsSettings] = useState(false);
+  const [showRewindDialog, setShowRewindDialog] = useState(false);
   const [forkCheckpointId, setForkCheckpointId] = useState<string | null>(null);
   const [forkSessionName, setForkSessionName] = useState("");
+  const [lastEscapeTime, setLastEscapeTime] = useState(0);
 
   // Queued prompts state
   const [queuedPrompts, setQueuedPrompts] = useState<Array<{ id: string; prompt: string; model: "sonnet" | "opus" | "sonnet1m" }>>([]);
@@ -165,6 +169,30 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
   React.useEffect(() => {
     console.debug('[ClaudeCodeSession] Translation enabled state:', translationEnabled);
   }, [translationEnabled]);
+
+  // Auto-cleanup old checkpoints on session initialization
+  React.useEffect(() => {
+    const cleanupOldCheckpoints = async () => {
+      if (extractedSessionInfo && projectPath) {
+        try {
+          const removed = await api.cleanupOldCheckpointsByAge(
+            extractedSessionInfo.sessionId,
+            extractedSessionInfo.projectId,
+            projectPath,
+            30 // 30 days as per Claude Code documentation
+          );
+          if (removed > 0) {
+            console.info(`[Checkpoint] Auto-cleaned ${removed} checkpoints older than 30 days`);
+          }
+        } catch (err) {
+          console.warn('[Checkpoint] Failed to auto-cleanup old checkpoints:', err);
+          // Non-critical error, don't show to user
+        }
+      }
+    };
+
+    cleanupOldCheckpoints();
+  }, [extractedSessionInfo, projectPath]);
 
   // New state for preview feature
   const [showPreview, setShowPreview] = useState(false);
@@ -371,6 +399,37 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
     // Note: When tab becomes active, listeners will be set up by handleSendPrompt
   }, [isActive]);
 
+  // Double ESC key detection for rewind dialog
+  useEffect(() => {
+    const handleEscapeKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && isActive) {
+        const now = Date.now();
+
+        // Check if this is a double ESC within 300ms
+        if (now - lastEscapeTime < 300) {
+          event.preventDefault();
+          event.stopPropagation();
+
+          // Only show rewind dialog if we have session info
+          if (extractedSessionInfo && projectPath) {
+            console.log('[ClaudeCodeSession] Double ESC detected, opening rewind dialog');
+            setShowRewindDialog(true);
+          }
+        }
+
+        setLastEscapeTime(now);
+      }
+    };
+
+    if (isActive) {
+      document.addEventListener('keydown', handleEscapeKey, { capture: true });
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleEscapeKey, { capture: true });
+    };
+  }, [lastEscapeTime, isActive, extractedSessionInfo, projectPath]);
+
   // Smart scroll detection - detect when user manually scrolls
   useEffect(() => {
     const scrollElement = parentRef.current;
@@ -380,20 +439,20 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       const { scrollTop, scrollHeight, clientHeight } = scrollElement;
       const currentScrollPosition = scrollTop;
       const isAtBottom = scrollTop + clientHeight >= scrollHeight - 50; // 50px threshold
-      
+
       // Detect if this was a user-initiated scroll
       const scrollDifference = Math.abs(currentScrollPosition - lastScrollPositionRef.current);
       if (scrollDifference > 5) { // Only count significant scroll movements
         const wasUserScroll = !shouldAutoScroll || scrollDifference > 100;
-        
+
         if (wasUserScroll) {
           setUserScrolled(!isAtBottom);
           setShouldAutoScroll(isAtBottom);
         }
       }
-      
+
       lastScrollPositionRef.current = currentScrollPosition;
-      
+
       // Reset user scroll state after inactivity
       if (scrollTimeoutRef.current) {
         clearTimeout(scrollTimeoutRef.current);
@@ -784,6 +843,20 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           console.log('[ClaudeCodeSession] ✅ Normalized top-level usage data:', processedMessage.usage);
         }
         setMessages((prev) => [...prev, processedMessage]);
+
+        // Track message for checkpointing
+        if (extractedSessionInfo) {
+          try {
+            await api.trackCheckpointMessage(
+              extractedSessionInfo.sessionId,
+              extractedSessionInfo.projectId,
+              projectPath,
+              payload
+            );
+          } catch (err) {
+            console.error('[Checkpoint] Failed to track message:', err);
+          }
+        }
       } catch (usageError) {
         console.warn('[ClaudeCodeSession] Error normalizing usage data, adding message without usage:', usageError);
         // Remove problematic usage data and add message anyway
@@ -1488,17 +1561,38 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               );
 
               if (settings.auto_checkpoint_enabled) {
-                await api.checkAutoCheckpoint(
+                console.log('[Checkpoint] Checking if auto-checkpoint should be created...');
+                const shouldCreate = await api.checkAutoCheckpoint(
                   effectiveSession.id,
                   effectiveSession.project_id,
                   projectPath,
                   prompt
                 );
-                // Reload timeline to show new checkpoint
-                setTimelineVersion((v) => v + 1);
+
+                if (shouldCreate) {
+                  console.log('[Checkpoint] Creating auto-checkpoint...');
+
+                  // Generate meaningful description
+                  const timestamp = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+                  const promptPreview = prompt.substring(0, 60).replace(/\n/g, ' ').trim();
+                  const description = `${timestamp} - ${promptPreview}${prompt.length > 60 ? '...' : ''}`;
+
+                  await api.createCheckpoint(
+                    effectiveSession.id,
+                    effectiveSession.project_id,
+                    projectPath,
+                    messages.length,
+                    description
+                  );
+                  console.log('[Checkpoint] Auto-checkpoint created successfully:', description);
+                  // Reload timeline to show new checkpoint
+                  setTimelineVersion((v) => v + 1);
+                } else {
+                  console.log('[Checkpoint] Auto-checkpoint not needed');
+                }
               }
             } catch (err) {
-              console.error('Failed to check auto checkpoint:', err);
+              console.error('Failed to auto-create checkpoint:', err);
             }
           }
 
@@ -2219,6 +2313,27 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                   projectPath={projectPath}
                 />
               )}
+              {/* Rewind 快捷按钮 */}
+              {effectiveSession && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowRewindDialog(true)}
+                        className="h-8 px-3"
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      <p>恢复检查点 (ESC + ESC)</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+
               {/* 合并的检查点功能按钮 */}
               {effectiveSession && (
                 <DropdownMenu>
@@ -2233,7 +2348,14 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                       <ChevronDown className="h-3 w-3 ml-1" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-32">
+                  <DropdownMenuContent align="end" className="w-40">
+                    <DropdownMenuItem
+                      onClick={() => setShowRewindDialog(true)}
+                      className="text-xs"
+                    >
+                      <RotateCcw className="h-3 w-3 mr-2" />
+                      恢复检查点
+                    </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => setShowSettings(!showSettings)}
                       className="text-xs"
@@ -2612,6 +2734,24 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
             </div>
           </DialogContent>
         </Dialog>
+      )}
+
+      {/* Rewind Dialog - Triggered by double ESC */}
+      {showRewindDialog && effectiveSession && (
+        <RewindDialog
+          isOpen={showRewindDialog}
+          onClose={() => setShowRewindDialog(false)}
+          sessionId={effectiveSession.id}
+          projectId={effectiveSession.project_id}
+          projectPath={projectPath}
+          currentMessageIndex={messages.length}
+          onRestoreComplete={() => {
+            // Reload session history after restore
+            loadSessionHistory();
+            // Increment timeline version to trigger refresh
+            setTimelineVersion(prev => prev + 1);
+          }}
+        />
       )}
 
     </div>

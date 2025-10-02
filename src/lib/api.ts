@@ -1378,19 +1378,22 @@ export const api = {
   },
 
   /**
-   * Restores a session to a specific checkpoint
+   * Restores a session to a specific checkpoint with specified restore mode
+   * @param restoreMode - 'conversation_only' | 'code_only' | 'both' (defaults to 'both')
    */
   async restoreCheckpoint(
     checkpointId: string,
     sessionId: string,
     projectId: string,
-    projectPath: string
+    projectPath: string,
+    restoreMode?: 'conversation_only' | 'code_only' | 'both'
   ): Promise<CheckpointResult> {
     return invoke("restore_checkpoint", {
       checkpointId,
       sessionId,
       projectId,
-      projectPath
+      projectPath,
+      restoreMode: restoreMode || 'both'
     });
   },
 
@@ -1548,6 +1551,28 @@ export const api = {
       });
     } catch (error) {
       console.error("Failed to cleanup old checkpoints:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Cleanup checkpoints older than specified days (default: 30 days per Claude Code docs)
+   */
+  async cleanupOldCheckpointsByAge(
+    sessionId: string,
+    projectId: string,
+    projectPath: string,
+    days?: number
+  ): Promise<number> {
+    try {
+      return await invoke<number>("cleanup_old_checkpoints_by_age", {
+        sessionId,
+        projectId,
+        projectPath,
+        days: days ?? 30 // Default to 30 days
+      });
+    } catch (error) {
+      console.error("Failed to cleanup old checkpoints by age:", error);
       throw error;
     }
   },
