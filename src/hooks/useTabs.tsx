@@ -16,6 +16,13 @@ export interface TabSessionData {
   createdAt: number;
   lastActivityAt: number;
   cleanup?: () => Promise<void> | void;
+  // 🔧 NEW: 错误状态支持
+  error?: {
+    message: string;
+    timestamp: number;
+    canRetry: boolean;
+    operation: string; // 'cleanup' | 'load' | 'save' 等
+  };
 }
 
 // 🔧 NEW: Computed interface with isActive derived from activeTabId
@@ -28,7 +35,8 @@ interface TabContextValue {
   activeTabId: string | null;
   createNewTab: (session?: Session, projectPath?: string, activate?: boolean) => string;
   switchToTab: (tabId: string) => void;
-  closeTab: (tabId: string, force?: boolean) => Promise<void>;
+  // 🔧 IMPROVED: closeTab可以返回确认需求或void
+  closeTab: (tabId: string, force?: boolean) => Promise<{ needsConfirmation?: boolean; tabId?: string } | void>;
   updateTabStreamingStatus: (tabId: string, isStreaming: boolean, sessionId: string | null) => void;
   updateTabChanges: (tabId: string, hasChanges: boolean) => void;
   updateTabTitle: (tabId: string, title: string) => void;
@@ -40,6 +48,10 @@ interface TabContextValue {
   // 🔧 NEW: Separate UI logic from state management
   canCloseTab: (tabId: string) => { canClose: boolean; hasUnsavedChanges: boolean };
   forceCloseTab: (tabId: string) => Promise<void>;
+  // 🔧 NEW: 拖拽排序功能
+  reorderTabs: (fromIndex: number, toIndex: number) => void;
+  // 🔧 NEW: 错误状态管理
+  clearTabError: (tabId: string) => void;
 }
 
 const TabContext = createContext<TabContextValue | null>(null);
@@ -79,19 +91,63 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
       const persistedState = localStorage.getItem(STORAGE_KEY);
       if (persistedState) {
         const { tabsData: savedTabsData, activeTabId: savedActiveTabId } = JSON.parse(persistedState);
+
         if (Array.isArray(savedTabsData)) {
-          // Filter out sessions that might be invalid and cleanup callbacks (not serializable)
-          const validTabsData = savedTabsData.map((tab: any) => ({
-            ...tab,
-            cleanup: undefined, // Will be re-registered when components mount
-          }));
+          // 🔧 IMPROVED: 验证并过滤无效数据
+          const validTabsData = savedTabsData
+            .map((tab: any) => {
+              // 验证必需字段
+              if (!tab.id || typeof tab.id !== 'string') {
+                console.warn('[useTabs] Invalid tab: missing or invalid id', tab);
+                return null;
+              }
+
+              if (!tab.title || typeof tab.title !== 'string') {
+                console.warn('[useTabs] Invalid tab: missing or invalid title', tab);
+                return null;
+              }
+
+              // 验证session结构（如果存在）
+              if (tab.session) {
+                if (!tab.session.id || !tab.session.project_path) {
+                  console.warn('[useTabs] Invalid session data, clearing session:', tab.session);
+                  tab.session = undefined; // 清除无效session
+                }
+              }
+
+              return {
+                ...tab,
+                cleanup: undefined, // Will be re-registered when components mount
+              };
+            })
+            .filter((tab): tab is TabSessionData => tab !== null);
+
+          // 验证activeTabId是否合法
+          const validActiveTabId = validTabsData.find(t => t.id === savedActiveTabId)
+            ? savedActiveTabId
+            : (validTabsData[0]?.id || null);
+
           setTabsData(validTabsData);
-          setActiveTabId(savedActiveTabId);
-          console.log('[useTabs] Restored tab state from localStorage:', validTabsData.length, 'tabs');
+          setActiveTabId(validActiveTabId);
+
+          console.log(
+            '[useTabs] Restored and validated tab state:',
+            validTabsData.length,
+            'valid tabs from',
+            savedTabsData.length,
+            'saved tabs'
+          );
         }
       }
     } catch (error) {
       console.error('[useTabs] Failed to restore tab state:', error);
+      // 🔧 NEW: 清除损坏的localStorage数据
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+        console.warn('[useTabs] Cleared corrupted localStorage data');
+      } catch (clearError) {
+        console.error('[useTabs] Failed to clear corrupted data:', clearError);
+      }
     }
   }, []);
 
@@ -119,20 +175,38 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
     return `tab-${Date.now()}-${nextTabId.current++}`;
   }, []);
 
-  // 生成标签页标题
+  // 🔧 IMPROVED: 生成更智能的标签页标题
   const generateTabTitle = useCallback((session?: Session, projectPath?: string) => {
     if (session) {
       // 从会话信息中提取更有意义的标题
-      const sessionName = session.id.slice(-8);
       const projectName = session.project_path
         ? (session.project_path.split('/').pop() || session.project_path.split('\\').pop())
         : '';
-      return projectName ? `${projectName} - ${sessionName}` : `会话 ${sessionName}`;
+
+      // 格式化项目名：移除常见前缀，首字母大写
+      const formattedProjectName = projectName
+        ? projectName.replace(/^(my-|test-|demo-)/, '').replace(/[-_]/g, ' ')
+        : '';
+
+      // 使用更友好的会话标识（时间 + 短ID）
+      const now = new Date();
+      const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+      const shortId = session.id.slice(-4); // 只用最后4位
+
+      if (formattedProjectName) {
+        return `${formattedProjectName} (${timeStr})`;
+      }
+      return `会话 ${timeStr}-${shortId}`;
     }
+
     if (projectPath) {
       const projectName = projectPath.split('/').pop() || projectPath.split('\\').pop();
-      return `新会话 - ${projectName}`;
+      const formattedName = projectName
+        ? projectName.replace(/^(my-|test-|demo-)/, '').replace(/[-_]/g, ' ')
+        : '';
+      return formattedName ? `新会话 · ${formattedName}` : `新会话 ${nextTabId.current}`;
     }
+
     return `新会话 ${nextTabId.current}`;
   }, []);
 
@@ -184,14 +258,37 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
   const forceCloseTab = useCallback(async (tabId: string) => {
     const tab = tabsData.find(t => t.id === tabId);
 
-    // Execute cleanup callback if present
+    // 🔧 IMPROVED: Execute cleanup callback if present（容错处理 + 错误状态记录）
     if (tab?.cleanup) {
       try {
         console.log(`[useTabs] Executing cleanup for tab ${tabId}`);
         await tab.cleanup();
       } catch (error) {
-        console.error(`[useTabs] Cleanup failed for tab ${tabId}:`, error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error(`[useTabs] Cleanup failed for tab ${tabId}:`, errorMessage);
+
+        // 🔧 NEW: 记录错误状态（不阻止关闭，但记录错误供UI层显示）
+        setTabsData(prev =>
+          prev.map(t =>
+            t.id === tabId
+              ? {
+                  ...t,
+                  error: {
+                    message: `清理资源失败: ${errorMessage}`,
+                    timestamp: Date.now(),
+                    canRetry: false, // cleanup失败后无法重试，标签页即将关闭
+                    operation: 'cleanup',
+                  },
+                }
+              : t
+          )
+        );
+        // 继续关闭标签页，不阻塞流程（延迟1秒让UI有时间显示错误）
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
+    } else {
+      // 🔧 NEW: cleanup未注册时输出警告（localStorage恢复后可能未注册）
+      console.warn(`[useTabs] No cleanup registered for tab ${tabId}, skipping cleanup (may be restored from localStorage)`);
     }
 
     setTabsData(prevTabsData => {
@@ -213,7 +310,8 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
   }, [activeTabId, tabsData]);
 
   // 关闭标签页 (with UI confirmation)
-  const closeTab = useCallback(async (tabId: string, force = false) => {
+  // 🔧 IMPROVED: 返回确认状态，让UI层处理Dialog
+  const closeTab = useCallback(async (tabId: string, force = false): Promise<{ needsConfirmation?: boolean; tabId?: string } | void> => {
     if (force) {
       return forceCloseTab(tabId);
     }
@@ -221,11 +319,8 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
     const { canClose, hasUnsavedChanges } = canCloseTab(tabId);
 
     if (!canClose && hasUnsavedChanges) {
-      // 🔧 MOVED: UI logic should be handled by the component layer
-      const shouldClose = confirm('此会话有未保存的更改，确定要关闭吗？');
-      if (!shouldClose) {
-        return; // 不关闭
-      }
+      // 返回需要确认的标识，由UI层处理Dialog
+      return { needsConfirmation: true, tabId };
     }
 
     return forceCloseTab(tabId);
@@ -312,6 +407,29 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
     );
   }, []);
 
+  // 🔧 NEW: 重排序标签页（拖拽功能）
+  const reorderTabs = useCallback((fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+
+    setTabsData(prevData => {
+      const newData = [...prevData];
+      const [removed] = newData.splice(fromIndex, 1);
+      newData.splice(toIndex, 0, removed);
+
+      console.log(`[useTabs] Reordered tab from index ${fromIndex} to ${toIndex}`);
+      return newData;
+    });
+  }, []);
+
+  // 🔧 NEW: 清除标签页错误状态
+  const clearTabError = useCallback((tabId: string) => {
+    setTabsData(prev =>
+      prev.map(t =>
+        t.id === tabId ? { ...t, error: undefined } : t
+      )
+    );
+  }, []);
+
   const contextValue: TabContextValue = {
     tabs,
     activeTabId,
@@ -328,6 +446,8 @@ export const TabProvider: React.FC<TabProviderProps> = ({ children }) => {
     registerTabCleanup,
     canCloseTab,
     forceCloseTab,
+    reorderTabs, // 🔧 NEW: 拖拽排序
+    clearTabError, // 🔧 NEW: 错误状态管理
   };
 
   return (

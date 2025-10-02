@@ -15,9 +15,18 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { TabSessionWrapper } from './TabSessionWrapper';
 import { useTabs } from '@/hooks/useTabs';
+import { useSessionSync } from '@/hooks/useSessionSync'; // 🔧 NEW: 会话状态同步
 import type { Session } from '@/lib/api';
 
 interface TabManagerProps {
@@ -51,14 +60,25 @@ export const TabManager: React.FC<TabManagerProps> = ({
     switchToTab,
     closeTab,
     updateTabStreamingStatus,
+    reorderTabs, // 🔧 NEW: 拖拽排序
   } = useTabs();
 
+  // 🔧 NEW: 启用会话状态同步
+  useSessionSync();
+
   const [draggedTab, setDraggedTab] = useState<string | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null); // 🔧 NEW: 拖拽悬停的位置
+  const [tabToClose, setTabToClose] = useState<string | null>(null); // 🔧 NEW: 待关闭的标签页ID（需要确认）
   const tabsContainerRef = useRef<HTMLDivElement>(null);
-  // 🔧 FIX: Track initialization to prevent auto-creation after user closes all tabs
-  const hasInitializedRef = useRef(false);
-  // 🔧 NEW: Track what we initialized with to prevent duplicate creation
-  const initializedWithRef = useRef<{ session?: string; path?: string }>({});
+
+  // 🔧 IMPROVED: 使用单一状态机管理初始化，替换双重ref跟踪
+  type InitState =
+    | { type: 'uninitialized' }
+    | { type: 'initialized'; source: 'session'; sessionId: string }
+    | { type: 'initialized'; source: 'path'; path: string }
+    | { type: 'initialized'; source: 'empty' };
+
+  const [initState, setInitState] = useState<InitState>({ type: 'uninitialized' });
 
   // 拖拽处理
   const handleTabDragStart = useCallback((tabId: string) => {
@@ -67,75 +87,97 @@ export const TabManager: React.FC<TabManagerProps> = ({
 
   const handleTabDragEnd = useCallback(() => {
     setDraggedTab(null);
+    setDragOverIndex(null); // 🔧 NEW: 清除拖拽悬停状态
   }, []);
 
-  // 🔧 FIX: 只在真正的初始化时创建标签页，避免重复创建
+  // 🔧 NEW: 拖拽悬停处理 - 计算drop位置
+  const handleTabDragOver = useCallback((e: React.DragEvent, index: number) => {
+    e.preventDefault(); // 必须阻止默认行为以允许drop
+    setDragOverIndex(index);
+  }, []);
+
+  // 🔧 NEW: 拖拽放置处理 - 执行重排序
+  const handleTabDrop = useCallback((e: React.DragEvent, targetIndex: number) => {
+    e.preventDefault();
+
+    if (!draggedTab) return;
+
+    // 查找被拖拽标签页的索���
+    const fromIndex = tabs.findIndex(t => t.id === draggedTab);
+    if (fromIndex === -1 || fromIndex === targetIndex) {
+      setDraggedTab(null);
+      setDragOverIndex(null);
+      return;
+    }
+
+    // 执行重排序
+    reorderTabs(fromIndex, targetIndex);
+    setDraggedTab(null);
+    setDragOverIndex(null);
+  }, [draggedTab, tabs, reorderTabs]);
+
+  // 🔧 NEW: 处理标签页关闭（支持确认Dialog）
+  const handleCloseTab = useCallback(async (tabId: string, force = false) => {
+    const result = await closeTab(tabId, force);
+
+    // 如果需要确认，显示Dialog
+    if (result && typeof result === 'object' && 'needsConfirmation' in result && result.needsConfirmation) {
+      setTabToClose(result.tabId || null);
+    }
+  }, [closeTab]);
+
+  // 🔧 NEW: 确认关闭标签页
+  const confirmCloseTab = useCallback(async () => {
+    if (tabToClose) {
+      await closeTab(tabToClose, true); // force close
+      setTabToClose(null);
+    }
+  }, [tabToClose, closeTab]);
+
+  // 🔧 IMPROVED: 使用状态机简化初始化逻辑（从63行减少到45行）
   useEffect(() => {
-    // 检查是否已经初始化过
-    if (hasInitializedRef.current) {
-      console.log('[TabManager] Already initialized, skipping');
+    // 状态机：只在uninitialized状态时执行初始化
+    if (initState.type !== 'uninitialized') {
       return;
     }
 
-    // 检查是否已经有标签页了
+    // 如果已经有标签页（localStorage恢复），标记为已初始化
     if (tabs.length > 0) {
-      console.log('[TabManager] Tabs already exist, skipping initialization');
-      hasInitializedRef.current = true;
+      console.log('[TabManager] Tabs restored from localStorage, marking as initialized');
+      setInitState({ type: 'initialized', source: 'empty' });
       return;
     }
 
-    console.log('[TabManager] Initial setup - checking if tab creation is needed');
-
-    // 如果有初始会话，检查是否已经为这个会话创建过
+    // 初始化逻辑：按优先级处理
     if (initialSession) {
       const sessionId = initialSession.id;
-      if (initializedWithRef.current.session === sessionId) {
-        console.log('[TabManager] Already created tab for this session, skipping');
-        return;
-      }
-
-      // 检查是否已经存在这个会话的标签页
+      // 检查是否已存在该会话的标签页
       const existingTab = tabs.find(tab => tab.session?.id === sessionId);
-      if (existingTab) {
-        console.log('[TabManager] Tab for this session already exists, skipping');
-        hasInitializedRef.current = true;
-        return;
+      if (!existingTab) {
+        console.log('[TabManager] Creating tab for initial session:', sessionId);
+        createNewTab(initialSession);
+        setInitState({ type: 'initialized', source: 'session', sessionId });
+      } else {
+        console.log('[TabManager] Tab for session already exists, skipping');
+        setInitState({ type: 'initialized', source: 'session', sessionId });
       }
-
-      console.log('[TabManager] Creating tab for initial session');
-      createNewTab(initialSession);
-      initializedWithRef.current.session = sessionId;
-      hasInitializedRef.current = true;
-    }
-    // 如果有初始项目路径，检查是否已经为这个路径创建过
-    else if (initialProjectPath) {
-      if (initializedWithRef.current.path === initialProjectPath) {
-        console.log('[TabManager] Already created tab for this path, skipping');
-        return;
-      }
-
-      // 检查是否已经存在这个路径的标签页
+    } else if (initialProjectPath) {
+      // 检查是否已存在该路径的标签页
       const existingTab = tabs.find(tab => tab.projectPath === initialProjectPath);
-      if (existingTab) {
-        console.log('[TabManager] Tab for this path already exists, skipping');
-        hasInitializedRef.current = true;
-        return;
+      if (!existingTab) {
+        console.log('[TabManager] Creating tab for initial project:', initialProjectPath);
+        createNewTab(undefined, initialProjectPath);
+        setInitState({ type: 'initialized', source: 'path', path: initialProjectPath });
+      } else {
+        console.log('[TabManager] Tab for path already exists, skipping');
+        setInitState({ type: 'initialized', source: 'path', path: initialProjectPath });
       }
-
-      console.log('[TabManager] Creating tab for initial project path');
-      createNewTab(undefined, initialProjectPath);
-      initializedWithRef.current.path = initialProjectPath;
-      hasInitializedRef.current = true;
+    } else {
+      // 无初始数据，显示空状态
+      console.log('[TabManager] No initial data - showing empty state');
+      setInitState({ type: 'initialized', source: 'empty' });
     }
-    // 🔧 IMPROVED: 不再自动创建默认标签页，让用户主动选择
-    else {
-      console.log('[TabManager] No initial session or path - showing empty state');
-      hasInitializedRef.current = true;
-    }
-  }, [tabs, createNewTab, initialSession, initialProjectPath]);
-
-  // 🔧 REMOVED: 不再在卸载时重置 flag，避免重复创建
-  // 现在依赖 initializedWithRef 来跟踪具体的初始化内容
+  }, [initState, tabs, initialSession, initialProjectPath, createNewTab]);
 
   return (
     <TooltipProvider>
@@ -160,7 +202,7 @@ export const TabManager: React.FC<TabManagerProps> = ({
               className="flex-1 flex items-center gap-1 overflow-x-auto scrollbar-none"
             >
               <AnimatePresence mode="popLayout">
-                {tabs.map((tab) => (
+                {tabs.map((tab, index) => (
                   <motion.div
                     key={tab.id}
                     layout
@@ -174,12 +216,15 @@ export const TabManager: React.FC<TabManagerProps> = ({
                       tab.isActive
                         ? "bg-background border-primary text-foreground"
                         : "bg-muted/50 border-transparent text-muted-foreground hover:bg-muted/80 hover:text-foreground",
-                      draggedTab === tab.id && "opacity-50"
+                      draggedTab === tab.id && "opacity-50",
+                      dragOverIndex === index && draggedTab !== tab.id && "ring-2 ring-primary/50" // 🔧 NEW: 拖拽悬停高亮
                     )}
                     onClick={() => switchToTab(tab.id)}
                     draggable
                     onDragStart={() => handleTabDragStart(tab.id)}
                     onDragEnd={handleTabDragEnd}
+                    onDragOver={(e) => handleTabDragOver(e, index)} // 🔧 NEW: 拖拽悬停
+                    onDrop={(e) => handleTabDrop(e, index)} // 🔧 NEW: 拖拽放置
                   >
                     {/* 会话状态指示器 */}
                     <div className="flex-shrink-0">
@@ -204,7 +249,7 @@ export const TabManager: React.FC<TabManagerProps> = ({
                       className="flex-shrink-0 h-5 w-5 p-0 opacity-0 group-hover:opacity-100 hover:bg-destructive/20 hover:text-destructive transition-opacity"
                       onClick={(e) => {
                         e.stopPropagation();
-                        closeTab(tab.id);
+                        handleCloseTab(tab.id);
                       }}
                     >
                       <X className="h-3 w-3" />
@@ -282,7 +327,7 @@ export const TabManager: React.FC<TabManagerProps> = ({
                     onBack();
                   } else {
                     // 否则关闭当前标签页
-                    closeTab(tab.id);
+                    handleCloseTab(tab.id);
                   }
                 }}
                 onProjectSettings={onProjectSettings}
@@ -325,6 +370,26 @@ export const TabManager: React.FC<TabManagerProps> = ({
             </div>
           )}
         </div>
+
+        {/* 🔧 NEW: 自定义关闭确认Dialog */}
+        <Dialog open={tabToClose !== null} onOpenChange={(open) => !open && setTabToClose(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>确认关闭标签页</DialogTitle>
+              <DialogDescription>
+                此会话有未保存的更改，确定要关闭吗？关闭后更改将丢失。
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setTabToClose(null)}>
+                取消
+              </Button>
+              <Button variant="destructive" onClick={confirmCloseTab}>
+                确认关闭
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </TooltipProvider>
   );
