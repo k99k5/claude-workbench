@@ -92,29 +92,74 @@ Core tables managed through `AgentDb` state wrapper:
 - **Command naming**: `domain_action` pattern (e.g., `provider_switch_config`, `storage_list_tables`)
 - **Error handling**: All IPC calls must handle errors gracefully with user feedback
 
-## Important Implementation Details
+## Critical System Details
 
-### Process Management
-- Claude sessions are registered in ProcessRegistry with unique run_ids
-- Agent executions spawn separate processes tracked independently
-- All processes support real-time output streaming
+### Provider/Proxy Management System ⭐ (Core Feature)
+**Purpose**: Silent switching between different Claude API providers/proxies without popups
+- **Configuration Storage**: Local SQLite database (never hardcoded in code)
+- **API Methods**: `getProviderPresets()`, `switchProviderConfig()`, `addProviderConfig()`, etc.
+- **Auto-Restart**: Automatically restarts Claude process when provider changes
+- **Environment**: Sets `ANTHROPIC_BASE_URL` and auth tokens at runtime
+- **Detection**: Intelligently identifies current active configuration
+- **Location**: `src-tauri/src/commands/provider.rs`, `src/components/ProviderManager.tsx`
+
+### Checkpoint System
+**Advanced features beyond basic snapshots**:
+- **Content-Addressable Storage**: Files stored by hash in content pool to prevent duplication
+- **Zstd Compression**: All messages and file snapshots compressed (see `Cargo.toml`)
+- **Timeline Branching**: Fork new sessions from any checkpoint
+- **Restore Modes**: messages-only, files-only, or both
+- **Auto-Checkpoint Strategies**: Configurable triggers (token count, message count, time-based)
+- **Diff Visualization**: Compare any two checkpoints with detailed diffs
+- **Location**: `src-tauri/src/checkpoint/`, API in `lib/api.ts` (checkpoint_* methods)
+
+### Multi-Tab Session Management
+**State synchronization architecture**:
+- **Session Sync**: 5-second interval background sync to detect state inconsistencies
+- **Consistency Checks**: Corrects tabs showing wrong streaming status
+- **Session Wrapper**: Each tab wrapped in `TabSessionWrapper` with isolated state
+- **Process Tracking**: Maps tab sessions to running Claude process IDs
+- **Location**: `src/hooks/useTabs.tsx`, `src/hooks/useSessionSync.ts`
+
+### Auto-Compact Context Management
+**Intelligent token optimization**:
+- **Purpose**: Automatically compress conversation context when approaching token limits
+- **Strategies**: Configurable compaction strategies (aggressive, balanced, conservative)
+- **Monitoring**: Tracks token counts per session with threshold-based triggers
+- **Compression Ratio**: Reports saved tokens and processing time
+- **Manual Triggers**: Users can manually trigger compaction
+- **Location**: `src-tauri/src/commands/context_manager.rs`, `context_commands.rs`
+
+### Translation/i18n System
+**Production-ready internationalization**:
+- **Framework**: i18next with browser language detection
+- **Caching**: Translation cache with statistics tracking
+- **Batch Support**: `translate_batch()` for multiple strings
+- **Language Detection**: Auto-detect source language
+- **Configuration**: Persistent config storage with API endpoints
+- **Location**: `src-tauri/src/commands/translator.rs`, `src/i18n/`
 
 ### MCP (Model Context Protocol)
 - Full MCP server management with connection testing
 - Project-specific MCP configurations stored in database
 - Supports both local and remote MCP servers
+- Configuration UI in Settings tab
 
 ### Agent System
-- Agents can be imported from GitHub (getAsterisk/claudia repository)
-- Supports custom agent creation with .claudia.json format
+- Import agents from GitHub (getAsterisk/claudia repository)
+- Custom agent creation with `.claudia.json` format
 - Agent runs tracked with detailed metrics and output history
+- Subagents support for complex workflows
 
-### Database Operations
-- All database operations go through AgentDb state wrapper
-- SQLite connection managed as Tauri state
-- Storage tab provides direct database inspection/editing interface
+### Enhanced Hooks System
+- Project-specific workflow automation
+- Pre-commit hooks and custom event triggers
+- Configuration stored at project or global level
 
-### Hooks System
-- Enhanced hooks automation for project-specific workflows
-- Supports pre-commit hooks and custom event triggers
-- Configuration stored in project-level or global settings
+### Process Registry (Critical)
+**Central tracking for all background operations**:
+- Tracks all running Claude sessions with unique run_ids
+- Agent executions spawn separate tracked processes
+- Real-time output streaming support
+- Process cleanup on application shutdown
+- **Location**: `src-tauri/src/process/`
