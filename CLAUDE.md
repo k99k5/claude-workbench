@@ -75,22 +75,22 @@ Core tables managed through `AgentDb` state wrapper:
 ## Code Conventions
 
 ### TypeScript/React
-- Strict TypeScript mode enabled
-- PascalCase for React components
-- camelCase for files and functions
-- Tailwind CSS with atomic classes preferred
+- Strict TypeScript mode enabled - **run `tsc` before builds**
+- PascalCase for React components, camelCase for files/functions
+- Tailwind CSS 4 with atomic utility classes (OKLCH color space for theming)
 - React hooks + Context pattern for state management
+- All Tauri commands invoked through `lib/api.ts` (never invoke directly)
 
 ### Rust
-- Standard Rust conventions
-- Tauri command handlers use `#[tauri::command]` macro
-- Error handling with `Result<T, String>` pattern
+- Standard Rust conventions with `#[tauri::command]` macro for handlers
+- Error handling: `Result<T, String>` pattern for all commands
 - Async operations use tokio runtime
+- Database operations always go through `AgentDb` state wrapper
 
-### IPC Communication
-- Use `api.ts` for all Tauri command invocations
-- Commands follow `domain_action` naming pattern (e.g., `storage_list_tables`)
-- All IPC calls should handle errors gracefully
+### IPC Communication Pattern
+- **Frontend → Backend**: Use `api.ts` methods, never invoke directly
+- **Command naming**: `domain_action` pattern (e.g., `provider_switch_config`, `storage_list_tables`)
+- **Error handling**: All IPC calls must handle errors gracefully with user feedback
 
 ## Important Implementation Details
 
