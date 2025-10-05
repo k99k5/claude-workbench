@@ -163,3 +163,60 @@ Core tables managed through `AgentDb` state wrapper:
 - Real-time output streaming support
 - Process cleanup on application shutdown
 - **Location**: `src-tauri/src/process/`
+
+## Build Profiles & Performance
+
+### Cargo Build Profiles (see `Cargo.toml`)
+- **release**: Production build optimized for size
+  - `opt-level = "z"` (optimize for size)
+  - Full LTO enabled
+  - Strips symbols, disables debug info
+  - Single codegen unit for maximum optimization
+  - **Use for**: Final production releases
+
+- **dev-release**: Fast development builds
+  - `opt-level = 2` (balanced performance)
+  - Thin LTO (faster than full)
+  - 16 codegen units (parallel compilation)
+  - Incremental compilation enabled
+  - Debug info included
+  - **Use for**: Testing builds without waiting for full optimization
+
+### Performance Considerations
+- **Compression**: Zstd library used for checkpoint compression (see `Cargo.toml` dependencies)
+- **Database**: SQLite bundled statically for maximum compatibility
+- **Async Runtime**: Tokio with full features for concurrent operations
+
+## Platform-Specific Notes
+
+### Windows
+- Claude CLI paths: Check `AppData/Roaming/npm/claude.cmd` or `.npm-global/bin/claude`
+- Binary detection looks for both `.exe` and `.cmd` extensions
+
+### macOS
+- Common paths: `/usr/local/bin/claude`, `/opt/homebrew/bin/claude`
+- Icon configuration required: `icon.icns` in `src-tauri/icons/`
+
+### Linux
+- Standard paths: `~/.local/bin/claude`, `~/.npm-global/bin/claude`
+
+## Development Tips
+
+### Debugging IPC Communication
+- All IPC calls go through `lib/api.ts` - add console logs there to trace command flow
+- Rust backend logs available via `env_logger` (see `main.rs`)
+
+### Database Inspection
+- Use the built-in Storage tab in Settings for direct table inspection/editing
+- Execute raw SQL queries through the SQL Query Editor
+- Database location: Platform-specific app data directory
+
+### Working with Checkpoints
+- Checkpoints stored in Claude CLI directory under `checkpoints/<project_id>/<session_id>/`
+- Content pool prevents file duplication across checkpoints
+- Messages stored as `.zst` compressed files
+
+### Translation Testing
+- Translation config persisted to file system
+- Cache cleared via `clear_translation_cache()` API method
+- Language detection available via `detect_text_language()`
