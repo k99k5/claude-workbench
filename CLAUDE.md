@@ -8,13 +8,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Development
 - `bun run tauri:dev` - Start development mode with hot reload
-- `tsc` - Run TypeScript type checking (MUST run before builds)
+- `tsc` - Run TypeScript type checking (**MUST run before builds to catch type errors**)
 - `bun run build` - Build frontend assets
-- `bun run tauri:build` - Build production desktop application
-- `bun run tauri:build-fast` - Fast development build using dev-release profile
+- `bun run tauri:build` - Production build (optimized for size with full LTO)
+- `bun run tauri:build-fast` - Fast development build using dev-release profile (recommended for testing)
 
 ### Dependencies
-- `bun install` - Install all dependencies (Bun is preferred over npm/yarn)
+- `bun install` - Install all dependencies (**Bun is the preferred package manager**, not npm/yarn)
 
 ## Architecture Overview
 
