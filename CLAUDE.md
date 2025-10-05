@@ -18,7 +18,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture Overview
 
-This is a **Tauri 2 desktop application** that provides a GUI wrapper for Claude CLI with advanced project management, agent systems, and MCP support.
+This is a **Tauri 2 desktop application** (Windows/macOS/Linux) that provides a professional GUI wrapper for Claude CLI with advanced features: Provider/Proxy management, intelligent checkpointing, multi-tab sessions, MCP support, agent systems, and auto-context compaction.
 
 ### Core Architecture Pattern
 ```
@@ -26,37 +26,51 @@ React Frontend (TypeScript) ↔ Tauri IPC Bridge ↔ Rust Backend
      │                              │                 │
   UI Components              Command Handlers    Claude CLI Process
   State Management            Database Ops        System Integration
-  API Calls                   File Operations     Windows APIs
+  API Calls                   File Operations     Platform APIs
+  Tab Management              Compression         Process Registry
 ```
 
-### Key Components
+### Key Backend Components (src-tauri/src/)
 
-**Frontend (src/)**
-- **App.tsx**: Main application router and state management
-- **components/**: React components following PascalCase naming
-- **lib/api.ts**: Tauri IPC command invocations
-- **contexts/**: React contexts for global state (theme, etc.)
-
-**Backend (src-tauri/src/)**
-- **main.rs**: Application entry point and command registration
-- **commands/**: Tauri command handlers organized by domain:
-  - `claude.rs`: Claude CLI process management and execution
-  - `agents.rs`: Agent system with GitHub integration
+**Core Systems**
+- **main.rs**: Application entry point with all command registrations
+- **commands/**: Domain-specific command handlers
+  - `claude.rs`: Claude CLI process lifecycle and execution
+  - `agents.rs` + `subagents.rs`: Agent system with GitHub integration
+  - `provider.rs`: **Provider/proxy configuration management (core feature)**
   - `storage.rs`: SQLite database operations
-  - `mod.rs`: Command module declarations
-- **process/**: Process registry for managing Claude sessions and agent runs
+  - `translator.rs`: Translation service with caching
+  - `context_manager.rs` + `context_commands.rs`: Auto-compact context system
+  - `enhanced_hooks.rs`: Enhanced hooks automation
+  - `mcp.rs`: MCP server management
+  - `clipboard.rs`: Clipboard operations
+  - `slash_commands.rs`: Custom slash command management
+  - `permission_config.rs`: Permission configuration
+  - `usage.rs`: Usage tracking
 
-### Database Architecture
-Uses SQLite with these core tables managed in `storage.rs`:
-- `agents`: Agent definitions and configurations
-- `agent_runs`: Execution history and metrics
-- `app_settings`: Application configuration storage
+**Process & Storage**
+- **process/**: ProcessRegistry for tracking all running Claude sessions and agent executions
+- **checkpoint/**: Checkpoint system with content-addressable storage and zstd compression
 
-### Claude CLI Integration
-The application manages Claude CLI processes through:
-- **ProcessRegistry**: Tracks running Claude sessions and agent executions
-- **ClaudeProcessState**: Manages active Claude process lifecycle
-- **Session Management**: Handles multiple concurrent Claude conversations
+### Key Frontend Components (src/)
+
+**Core UI**
+- **App.tsx**: Main router and global state management
+- **lib/api.ts**: All Tauri IPC command invocations (single source of truth)
+- **components/**: React components (PascalCase naming)
+  - `TabManager.tsx` + `TabSessionWrapper.tsx`: Multi-tab session management
+  - `ProviderManager.tsx`: Provider switching UI (**core feature**)
+  - `CheckpointTimeline.tsx`: Timeline visualization and restoration
+  - `StorageTab.tsx`: Direct database inspection/editing
+- **contexts/**: React contexts (theme, translation, etc.)
+- **hooks/**: Custom hooks including `useTabs.tsx`, `useSessionSync.ts`
+
+### Database Architecture (SQLite)
+Core tables managed through `AgentDb` state wrapper:
+- **agents**: Agent definitions and configurations
+- **agent_runs**: Execution history and performance metrics
+- **app_settings**: Application-wide settings
+- **provider_configs**: Custom provider/proxy configurations (stored locally, never hardcoded)
 
 ## Code Conventions
 
