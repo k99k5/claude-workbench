@@ -2300,33 +2300,42 @@ pub async fn create_checkpoint(
         .await
         .map_err(|e| format!("Failed to get checkpoint manager: {}", e))?;
 
-    // Always load current session messages from the JSONL file
-    let session_path = get_claude_dir()
-        .map_err(|e| e.to_string())?
-        .join("projects")
-        .join(&project_id)
-        .join(format!("{}.jsonl", session_id));
+    // ✅ FIX: Only load messages if the manager is newly created (message count is 0)
+    let current_message_count = manager.get_message_count().await;
+    
+    if current_message_count == 0 {
+        log::info!("Loading messages from JSONL file for new checkpoint manager");
+        
+        let session_path = get_claude_dir()
+            .map_err(|e| e.to_string())?
+            .join("projects")
+            .join(&project_id)
+            .join(format!("{}.jsonl", session_id));
 
-    if session_path.exists() {
-        let file = fs::File::open(&session_path)
-            .map_err(|e| format!("Failed to open session file: {}", e))?;
-        let reader = BufReader::new(file);
+        if session_path.exists() {
+            let file = fs::File::open(&session_path)
+                .map_err(|e| format!("Failed to open session file: {}", e))?;
+            let reader = BufReader::new(file);
 
-        let mut line_count = 0;
-        for line in reader.lines() {
-            if let Some(index) = message_index {
-                if line_count > index {
-                    break;
+            let mut line_count = 0;
+            for line in reader.lines() {
+                if let Some(index) = message_index {
+                    if line_count > index {
+                        break;
+                    }
                 }
+                if let Ok(line) = line {
+                    manager
+                        .track_message(line)
+                        .await
+                        .map_err(|e| format!("Failed to track message: {}", e))?;
+                }
+                line_count += 1;
             }
-            if let Ok(line) = line {
-                manager
-                    .track_message(line)
-                    .await
-                    .map_err(|e| format!("Failed to track message: {}", e))?;
-            }
-            line_count += 1;
+            log::info!("Loaded {} messages from JSONL", line_count);
         }
+    } else {
+        log::info!("Using {} already-tracked messages", current_message_count);
     }
 
     manager

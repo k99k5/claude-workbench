@@ -12,3 +12,4 @@ pub mod context_manager;
 pub mod context_commands;
 pub mod subagents;
 pub mod enhanced_hooks;
+pub mod message_operations;

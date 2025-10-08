@@ -12,7 +12,8 @@ import {
   Command,
   DollarSign,
   Clock,
-  RotateCcw
+  RotateCcw,
+  Save
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -151,6 +152,128 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
       return `$${(amount * 100).toFixed(3)}¢`;
     }
     return `$${amount.toFixed(4)}`;
+  };
+
+  // ============================================================================
+  // MESSAGE-LEVEL OPERATIONS (Fine-grained Undo/Redo)
+  // ============================================================================
+
+  /**
+   * Undo messages up to a specific index
+   */
+  const handleMessageUndo = async (messageIndex: number) => {
+    if (!extractedSessionInfo || !projectPath) {
+      console.error('[MessageOps] Missing session info or project path');
+      return;
+    }
+
+    try {
+      console.log(`[MessageOps] Undoing to message index ${messageIndex}`);
+      
+      // Calculate how many messages to undo
+      const currentCount = messages.length;
+      const countToUndo = currentCount - messageIndex;
+      
+      await api.messageUndo(
+        extractedSessionInfo.sessionId,
+        extractedSessionInfo.projectId,
+        projectPath,
+        countToUndo
+      );
+      
+      // Reload messages
+      setMessages([]);
+      // Trigger session reload would be handled by parent if needed
+      console.log(`[MessageOps] Successfully undid ${countToUndo} messages`);
+    } catch (error) {
+      console.error('[MessageOps] Failed to undo messages:', error);
+      setError(error instanceof Error ? error.message : 'Failed to undo messages');
+    }
+  };
+
+  /**
+   * Edit a specific message
+   */
+  const handleMessageEdit = async (messageIndex: number, newContent: string) => {
+    if (!extractedSessionInfo || !projectPath) {
+      console.error('[MessageOps] Missing session info or project path');
+      return;
+    }
+
+    try {
+      console.log(`[MessageOps] Editing message index ${messageIndex}`);
+      
+      await api.messageEdit(
+        extractedSessionInfo.sessionId,
+        extractedSessionInfo.projectId,
+        projectPath,
+        messageIndex,
+        newContent
+      );
+      
+      // Clear messages and reload
+      setMessages([]);
+      console.log('[MessageOps] Message edited, ready to regenerate');
+    } catch (error) {
+      console.error('[MessageOps] Failed to edit message:', error);
+      setError(error instanceof Error ? error.message : 'Failed to edit message');
+    }
+  };
+
+  /**
+   * Delete a specific message
+   */
+  const handleMessageDelete = async (messageIndex: number) => {
+    if (!extractedSessionInfo || !projectPath) {
+      console.error('[MessageOps] Missing session info or project path');
+      return;
+    }
+
+    try {
+      console.log(`[MessageOps] Deleting message index ${messageIndex}`);
+      
+      await api.messageDelete(
+        extractedSessionInfo.sessionId,
+        extractedSessionInfo.projectId,
+        projectPath,
+        messageIndex
+      );
+      
+      // Reload messages
+      setMessages([]);
+      console.log('[MessageOps] Message deleted successfully');
+    } catch (error) {
+      console.error('[MessageOps] Failed to delete message:', error);
+      setError(error instanceof Error ? error.message : 'Failed to delete message');
+    }
+  };
+
+  /**
+   * Truncate messages to a specific index
+   */
+  const handleMessageTruncate = async (messageIndex: number) => {
+    if (!extractedSessionInfo || !projectPath) {
+      console.error('[MessageOps] Missing session info or project path');
+      return;
+    }
+
+    try {
+      console.log(`[MessageOps] Truncating to message index ${messageIndex}`);
+      
+      await api.messageTruncateToIndex(
+        extractedSessionInfo.sessionId,
+        extractedSessionInfo.projectId,
+        projectPath,
+        messageIndex
+      );
+      
+      // Reload messages
+      setMessages([]);
+      console.log('[MessageOps] Messages truncated successfully');
+    } catch (error) {
+      console.error('[MessageOps] Failed to truncate messages:', error);
+      setError(error instanceof Error ? error.message : 'Failed to truncate messages');
+    }
   };
 
   // Progressive translation state
@@ -853,6 +976,38 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
               projectPath,
               payload
             );
+
+            // ✅ FIX: Auto-checkpoint trigger after tool execution
+            // Check if this is a tool result message (indicating tool completion)
+            if (processedMessage.type === 'user' && 
+                processedMessage.message?.content?.some((c: any) => c.type === 'tool_result')) {
+              
+              console.log('[ClaudeCodeSession] Tool execution detected, checking auto-checkpoint...');
+              
+              try {
+                const shouldCheckpoint = await api.checkAutoCheckpoint(
+                  extractedSessionInfo.sessionId,
+                  extractedSessionInfo.projectId,
+                  projectPath,
+                  '' // Empty prompt for tool result
+                );
+                
+                if (shouldCheckpoint) {
+                  console.log('[ClaudeCodeSession] Creating auto-checkpoint after tool use...');
+                  await api.createCheckpoint(
+                    extractedSessionInfo.sessionId,
+                    extractedSessionInfo.projectId,
+                    projectPath,
+                    undefined,
+                    `自动检查点 - 工具执行后 (${new Date().toLocaleTimeString('zh-CN')})`
+                  );
+                  // Trigger timeline refresh
+                  setTimelineVersion(prev => prev + 1);
+                }
+              } catch (autoCheckpointError) {
+                console.warn('[ClaudeCodeSession] Auto-checkpoint failed:', autoCheckpointError);
+              }
+            }
           } catch (err) {
             console.error('[Checkpoint] Failed to track message:', err);
           }
@@ -1554,6 +1709,7 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
 
           if (effectiveSession && success) {
             try {
+              // ✅ FIX: Enhanced auto-checkpoint logic on session completion
               const settings = await api.getCheckpointSettings(
                 effectiveSession.id,
                 effectiveSession.project_id,
@@ -2062,6 +2218,14 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                   streamMessages={messages}
                   onLinkDetected={handleLinkDetected}
                   claudeSettings={claudeSettings}
+                  messageIndex={virtualItem.index}
+                  sessionId={extractedSessionInfo?.sessionId || null}
+                  projectId={extractedSessionInfo?.projectId || null}
+                  projectPath={projectPath || null}
+                  onMessageUndo={handleMessageUndo}
+                  onMessageEdit={handleMessageEdit}
+                  onMessageDelete={handleMessageDelete}
+                  onMessageTruncate={handleMessageTruncate}
                 />
               </motion.div>
             );
@@ -2313,6 +2477,46 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                   projectPath={projectPath}
                 />
               )}
+              {/* ⭐ 创建检查点按钮 */}
+              {effectiveSession && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={async () => {
+                          try {
+                            const description = `手动检查点 - ${new Date().toLocaleString('zh-CN')}`;
+                            await api.createCheckpoint(
+                              effectiveSession.id,
+                              effectiveSession.project_id,
+                              projectPath,
+                              messages.length,
+                              description
+                            );
+                            setTimelineVersion(prev => prev + 1);
+                            // Show success message
+                            console.log('[Checkpoint] 手动检查点创建成功');
+                          } catch (err) {
+                            console.error('[Checkpoint] 创建失败:', err);
+                            alert('创建检查点失败: ' + err);
+                          }
+                        }}
+                        disabled={isLoading}
+                        className="h-8 px-3"
+                      >
+                        <Save className="h-4 w-4 mr-1.5" />
+                        <span className="text-xs">检查点</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      <p>创建检查点保存当前状态</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+
               {/* Rewind 快捷按钮 */}
               {effectiveSession && (
                 <TooltipProvider>
@@ -2745,11 +2949,28 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
           projectId={effectiveSession.project_id}
           projectPath={projectPath}
           currentMessageIndex={messages.length}
-          onRestoreComplete={() => {
-            // Reload session history after restore
-            loadSessionHistory();
-            // Increment timeline version to trigger refresh
+          onRestoreComplete={async () => {
+            // ✅ FIX: Comprehensive restore completion handling
+            console.log('[ClaudeCodeSession] Restore completed, syncing state...');
+            
+            // 1. Stop any active streaming (if applicable)
+            if (isLoading) {
+              setIsLoading(false);
+            }
+            
+            // 2. Clear current messages to force reload
+            setMessages([]);
+            
+            // 3. Reload session history
+            await loadSessionHistory();
+            
+            // 4. Increment timeline version to trigger refresh
             setTimelineVersion(prev => prev + 1);
+            
+            // 5. Reset error state
+            setError(null);
+            
+            console.log('[ClaudeCodeSession] State sync completed');
           }}
         />
       )}

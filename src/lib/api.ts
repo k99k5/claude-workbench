@@ -1614,6 +1614,129 @@ export const api = {
     }
   },
 
+  // ============================================================================
+  // MESSAGE-LEVEL OPERATIONS (Fine-grained Undo/Redo)
+  // ============================================================================
+
+  /**
+   * Undo the last N messages (default 1)
+   * Creates a safety checkpoint before undoing
+   */
+  async messageUndo(
+    sessionId: string,
+    projectId: string,
+    projectPath: string,
+    count?: number
+  ): Promise<CheckpointResult> {
+    return invoke("message_undo", {
+      sessionId,
+      projectId,
+      projectPath,
+      count
+    });
+  },
+
+  /**
+   * Truncate messages to a specific index
+   * All messages after this index will be removed
+   */
+  async messageTruncateToIndex(
+    sessionId: string,
+    projectId: string,
+    projectPath: string,
+    messageIndex: number
+  ): Promise<CheckpointResult> {
+    return invoke("message_truncate_to_index", {
+      sessionId,
+      projectId,
+      projectPath,
+      messageIndex
+    });
+  },
+
+  /**
+   * Edit a specific message and regenerate from that point
+   */
+  async messageEdit(
+    sessionId: string,
+    projectId: string,
+    projectPath: string,
+    messageIndex: number,
+    newContent: string
+  ): Promise<CheckpointResult> {
+    return invoke("message_edit", {
+      sessionId,
+      projectId,
+      projectPath,
+      messageIndex,
+      newContent
+    });
+  },
+
+  /**
+   * Delete a specific message by index
+   */
+  async messageDelete(
+    sessionId: string,
+    projectId: string,
+    projectPath: string,
+    messageIndex: number
+  ): Promise<CheckpointResult> {
+    return invoke("message_delete", {
+      sessionId,
+      projectId,
+      projectPath,
+      messageIndex
+    });
+  },
+
+  /**
+   * Get the current number of messages in a session
+   */
+  async messageGetCount(
+    sessionId: string,
+    projectId: string,
+    projectPath: string
+  ): Promise<number> {
+    return invoke("message_get_count", {
+      sessionId,
+      projectId,
+      projectPath
+    });
+  },
+
+  /**
+   * Get a specific message by index
+   */
+  async messageGetByIndex(
+    sessionId: string,
+    projectId: string,
+    projectPath: string,
+    messageIndex: number
+  ): Promise<string> {
+    return invoke("message_get_by_index", {
+      sessionId,
+      projectId,
+      projectPath,
+      messageIndex
+    });
+  },
+
+  /**
+   * Get all messages in a session
+   */
+  async messageGetAll(
+    sessionId: string,
+    projectId: string,
+    projectPath: string
+  ): Promise<string[]> {
+    return invoke("message_get_all", {
+      sessionId,
+      projectId,
+      projectPath
+    });
+  },
+
   /**
    * Tracks a batch of messages for a session for checkpointing
    */

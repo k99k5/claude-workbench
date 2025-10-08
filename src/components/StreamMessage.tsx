@@ -15,6 +15,7 @@ import { getClaudeSyntaxTheme } from "@/lib/claudeSyntaxTheme";
 import { useTheme } from "@/contexts/ThemeContext";
 import { tokenExtractor } from "@/lib/tokenExtractor";
 import type { ClaudeStreamMessage } from "./AgentExecution";
+import { MessageActions } from "./MessageActions";
 
 // Utility function to format timestamp to hh:mm:ss format
 const formatTimestamp = (timestamp: string | undefined): string => {
@@ -68,12 +69,35 @@ interface StreamMessageProps {
   streamMessages: ClaudeStreamMessage[];
   onLinkDetected?: (url: string) => void;
   claudeSettings?: { showSystemInitialization?: boolean };
+  // Message operations
+  messageIndex?: number;
+  sessionId?: string | null;
+  projectId?: string | null;
+  projectPath?: string | null;
+  onMessageUndo?: (messageIndex: number) => Promise<void>;
+  onMessageEdit?: (messageIndex: number, newContent: string) => Promise<void>;
+  onMessageDelete?: (messageIndex: number) => Promise<void>;
+  onMessageTruncate?: (messageIndex: number) => Promise<void>;
 }
 
 /**
  * Component to render a single Claude Code stream message
  */
-const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, className, streamMessages, onLinkDetected, claudeSettings }) => {
+const StreamMessageComponent: React.FC<StreamMessageProps> = ({ 
+  message, 
+  className, 
+  streamMessages, 
+  onLinkDetected, 
+  claudeSettings,
+  messageIndex,
+  sessionId,
+  projectId,
+  projectPath,
+  onMessageUndo,
+  onMessageEdit,
+  onMessageDelete,
+  onMessageTruncate
+}) => {
   const { theme } = useTheme();
   // State to track tool results mapped by tool call ID
   const [toolResults, setToolResults] = useState<Map<string, any>>(new Map());
@@ -374,19 +398,47 @@ const StreamMessageComponent: React.FC<StreamMessageProps> = ({ message, classNa
       
       let renderedSomething = false;
       
+      // Extract message content for MessageActions
+      let messageContent = '';
+      if (typeof msg.content === 'string') {
+        messageContent = msg.content;
+      } else if (Array.isArray(msg.content)) {
+        const textContent = msg.content.find((c: any) => c.type === 'text');
+        if (textContent) {
+          messageContent = textContent.text || '';
+        }
+      }
+
       const renderedCard = (
-        <Card className={cn("border-muted-foreground/20 bg-muted/20", className)}>
+        <Card className={cn("border-muted-foreground/20 bg-muted/20 group", className)}>
           <CardContent className="p-4">
             <div className="flex items-start gap-3">
               <User className="h-5 w-5 text-muted-foreground mt-0.5" />
               <div className="flex-1 space-y-2 min-w-0">
                 <div className="flex items-center justify-between">
                   <div className="flex-1" />
-                  {formatTimestamp(message.sentAt) && (
-                    <span className="text-xs text-muted-foreground font-mono">
-                      {formatTimestamp(message.sentAt)}
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {formatTimestamp(message.sentAt) && (
+                      <span className="text-xs text-muted-foreground font-mono">
+                        {formatTimestamp(message.sentAt)}
+                      </span>
+                    )}
+                    {/* Message Actions */}
+                    {messageIndex !== undefined && sessionId && projectId && projectPath && (
+                      <MessageActions
+                        messageIndex={messageIndex}
+                        messageType="user"
+                        messageContent={messageContent}
+                        sessionId={sessionId}
+                        projectId={projectId}
+                        projectPath={projectPath}
+                        onUndo={onMessageUndo}
+                        onEdit={onMessageEdit}
+                        onDelete={onMessageDelete}
+                        onTruncate={onMessageTruncate}
+                      />
+                    )}
+                  </div>
                 </div>
                 {/* Handle content that is a simple string (e.g. from user commands) */}
                 {(typeof msg.content === 'string' || (msg.content && !Array.isArray(msg.content))) && (

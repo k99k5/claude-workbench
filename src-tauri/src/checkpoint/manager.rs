@@ -91,15 +91,30 @@ impl CheckpointManager {
             "edit" | "write" | "multiedit" => {
                 if let Some(file_path) = input.get("file_path").and_then(|p| p.as_str()) {
                     self.track_file_modification(file_path).await?;
+                    log::debug!("Tracked file modification via {}: {}", tool, file_path);
+                }
+            }
+            "create" => {
+                // Track file creation
+                if let Some(file_path) = input.get("file_path").and_then(|p| p.as_str()) {
+                    self.track_file_modification(file_path).await?;
+                    log::debug!("Tracked file creation: {}", file_path);
                 }
             }
             "bash" => {
                 // Try to detect file modifications from bash commands
                 if let Some(command) = input.get("command").and_then(|c| c.as_str()) {
                     self.track_bash_side_effects(command).await?;
+                    log::debug!("Tracked bash command: {}", command);
                 }
             }
-            _ => {}
+            "glob" | "grep" | "read" | "ls" => {
+                // Read-only operations, no tracking needed
+                log::debug!("Skipping read-only tool: {}", tool);
+            }
+            _ => {
+                log::debug!("Unknown tool type: {}", tool);
+            }
         }
         Ok(())
     }
@@ -163,21 +178,51 @@ impl CheckpointManager {
 
     /// Track potential file changes from bash commands
     async fn track_bash_side_effects(&self, command: &str) -> Result<()> {
-        // Common file-modifying commands
-        let file_commands = [
-            "echo", "cat", "cp", "mv", "rm", "touch", "sed", "awk", "npm", "yarn", "pnpm", "bun",
-            "cargo", "make", "gcc", "g++",
-        ];
-
-        // Simple heuristic: if command contains file-modifying operations
-        for cmd in &file_commands {
+        // ✅ FIX: More comprehensive bash command tracking
+        
+        // Commands that definitely modify files
+        let destructive_commands = ["rm", "rmdir", "del", "erase"];
+        let write_commands = ["echo", "cat", "cp", "mv", "touch", "tee", "sed", "awk", "dd"];
+        let build_commands = ["npm", "yarn", "pnpm", "bun", "cargo", "make", "gcc", "g++", "rustc", "go", "mvn", "gradle"];
+        
+        let mut is_destructive = false;
+        let mut is_write = false;
+        let mut is_build = false;
+        
+        // Check command type
+        for cmd in &destructive_commands {
             if command.contains(cmd) {
-                // Mark all tracked files as potentially modified
-                let mut tracker = self.file_tracker.write().await;
-                for (_, state) in tracker.tracked_files.iter_mut() {
-                    state.is_modified = true;
-                }
+                is_destructive = true;
                 break;
+            }
+        }
+        
+        for cmd in &write_commands {
+            if command.contains(cmd) {
+                is_write = true;
+                break;
+            }
+        }
+        
+        for cmd in &build_commands {
+            if command.contains(cmd) {
+                is_build = true;
+                break;
+            }
+        }
+        
+        if is_destructive || is_write || is_build {
+            log::info!("Detected file-modifying bash command: {} (destructive: {}, write: {}, build: {})",
+                      command, is_destructive, is_write, is_build);
+            
+            // ✅ FIX: Instead of marking all as modified, trigger a full scan
+            // This will be picked up on next checkpoint creation
+            let mut tracker = self.file_tracker.write().await;
+            
+            // Mark all tracked files as potentially modified
+            // On next checkpoint, these will be re-scanned
+            for (_, state) in tracker.tracked_files.iter_mut() {
+                state.is_modified = true;
             }
         }
 
@@ -852,5 +897,163 @@ impl CheckpointManager {
             .values()
             .map(|state| state.last_modified)
             .max()
+    }
+
+    // ============================================================================
+    // MESSAGE-LEVEL OPERATIONS (Fine-grained Undo/Redo)
+    // ============================================================================
+
+    /// Undo the last N messages (default 1)
+    /// Creates a checkpoint before undoing for safety
+    pub async fn undo_messages(&self, count: usize) -> Result<CheckpointResult> {
+        let messages = self.current_messages.write().await;
+        
+        if messages.is_empty() {
+            anyhow::bail!("No messages to undo");
+        }
+
+        let count = count.min(messages.len());
+        
+        // Create safety checkpoint before undoing
+        drop(messages);
+        let safety_checkpoint = self.create_checkpoint(
+            Some(format!("自动保存 - 撤销前")),
+            None,
+        ).await?;
+        
+        // Now actually remove messages
+        let mut messages = self.current_messages.write().await;
+        let original_len = messages.len();
+        let new_len = original_len.saturating_sub(count);
+        messages.truncate(new_len);
+        
+        log::info!("Undid {} messages (from {} to {})", count, original_len, messages.len());
+        
+        Ok(safety_checkpoint)
+    }
+
+    /// Truncate messages to a specific index (0-based)
+    /// All messages after this index will be removed
+    pub async fn truncate_to_message(&self, message_index: usize) -> Result<CheckpointResult> {
+        let messages = self.current_messages.write().await;
+        
+        if message_index >= messages.len() {
+            anyhow::bail!("Message index {} out of bounds (total: {})", message_index, messages.len());
+        }
+
+        // Create safety checkpoint
+        drop(messages);
+        let safety_checkpoint = self.create_checkpoint(
+            Some(format!("自动保存 - 截断到消息 #{}", message_index)),
+            None,
+        ).await?;
+
+        // Truncate to index + 1 (keep the message at index)
+        let mut messages = self.current_messages.write().await;
+        let original_len = messages.len();
+        messages.truncate(message_index + 1);
+        
+        log::info!("Truncated messages from {} to {} (kept up to index {})", 
+                   original_len, messages.len(), message_index);
+        
+        Ok(safety_checkpoint)
+    }
+
+    /// Edit a specific message and regenerate from that point
+    /// Returns the checkpoint created before editing
+    pub async fn edit_message(
+        &self,
+        message_index: usize,
+        new_content: String,
+    ) -> Result<CheckpointResult> {
+        let messages = self.current_messages.write().await;
+        
+        if message_index >= messages.len() {
+            anyhow::bail!("Message index {} out of bounds (total: {})", message_index, messages.len());
+        }
+
+        // Create safety checkpoint
+        drop(messages);
+        let safety_checkpoint = self.create_checkpoint(
+            Some(format!("自动保存 - 编辑消息 #{} 前", message_index)),
+            None,
+        ).await?;
+
+        // Edit the message
+        let mut messages = self.current_messages.write().await;
+        
+        // Parse the existing message to preserve structure
+        let original_msg = &messages[message_index];
+        if let Ok(mut msg_json) = serde_json::from_str::<serde_json::Value>(original_msg) {
+            // Update the text content while preserving structure
+            if let Some(message) = msg_json.get_mut("message") {
+                if let Some(content) = message.get_mut("content") {
+                    if let Some(content_array) = content.as_array_mut() {
+                        // Find and update text blocks
+                        for item in content_array {
+                            if item.get("type").and_then(|t| t.as_str()) == Some("text") {
+                                if let Some(text) = item.get_mut("text") {
+                                    *text = serde_json::Value::String(new_content.clone());
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            messages[message_index] = serde_json::to_string(&msg_json)?;
+        }
+
+        // Truncate all messages after the edited one
+        messages.truncate(message_index + 1);
+        
+        log::info!("Edited message #{} and truncated to {} messages", message_index, messages.len());
+        
+        Ok(safety_checkpoint)
+    }
+
+    /// Delete a specific message by index
+    pub async fn delete_message(&self, message_index: usize) -> Result<CheckpointResult> {
+        let messages = self.current_messages.write().await;
+        
+        if message_index >= messages.len() {
+            anyhow::bail!("Message index {} out of bounds (total: {})", message_index, messages.len());
+        }
+
+        // Create safety checkpoint
+        drop(messages);
+        let safety_checkpoint = self.create_checkpoint(
+            Some(format!("自动保存 - 删除消息 #{} 前", message_index)),
+            None,
+        ).await?;
+
+        // Delete the message
+        let mut messages = self.current_messages.write().await;
+        messages.remove(message_index);
+        
+        log::info!("Deleted message #{}, {} messages remaining", message_index, messages.len());
+        
+        Ok(safety_checkpoint)
+    }
+
+    /// Get the current number of messages
+    pub async fn get_message_count(&self) -> usize {
+        let messages = self.current_messages.read().await;
+        messages.len()
+    }
+
+    /// Get a specific message by index
+    pub async fn get_message(&self, index: usize) -> Result<String> {
+        let messages = self.current_messages.read().await;
+        messages.get(index)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("Message index {} out of bounds", index))
+    }
+
+    /// Get all messages as a vector
+    pub async fn get_all_messages(&self) -> Vec<String> {
+        let messages = self.current_messages.read().await;
+        messages.clone()
     }
 }
