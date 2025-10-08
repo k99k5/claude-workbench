@@ -29,7 +29,8 @@ import { api, type Session, type Project } from "@/lib/api";
 import { cn, normalizeUsageData } from "@/lib/utils";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { StreamMessage } from "./StreamMessage";
+// import { StreamMessage } from "./StreamMessage"; // 已替换为StreamMessageV2
+import { StreamMessageV2 } from "./message";
 import { FloatingPromptInput, type FloatingPromptInputRef } from "./FloatingPromptInput";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { TimelineNavigator } from "./TimelineNavigator";
@@ -2213,11 +2214,12 @@ export const ClaudeCodeSession: React.FC<ClaudeCodeSessionProps> = ({
                   top: virtualItem.start,
                 }}
               >
-                <StreamMessage
+                <StreamMessageV2
                   message={message}
                   streamMessages={messages}
                   onLinkDetected={handleLinkDetected}
                   claudeSettings={claudeSettings}
+                  isStreaming={virtualItem.index === displayableMessages.length - 1 && isLoading}
                   messageIndex={virtualItem.index}
                   sessionId={extractedSessionInfo?.sessionId || null}
                   projectId={extractedSessionInfo?.projectId || null}

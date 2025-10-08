@@ -8,3 +8,5 @@ export { MessageHeader } from "./MessageHeader";
 export { MessageContent } from "./MessageContent";
 export { UserMessage } from "./UserMessage";
 export { AIMessage } from "./AIMessage";
+export { ToolCallsGroup } from "./ToolCallsGroup";
+export { StreamMessageV2 } from "./StreamMessageV2";

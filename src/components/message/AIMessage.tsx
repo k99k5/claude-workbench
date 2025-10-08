@@ -2,12 +2,15 @@ import React from "react";
 import { MessageBubble } from "./MessageBubble";
 import { MessageHeader } from "./MessageHeader";
 import { MessageContent } from "./MessageContent";
+import { ToolCallsGroup } from "./ToolCallsGroup";
 import { cn } from "@/lib/utils";
 import type { ClaudeStreamMessage } from "../AgentExecution";
 
 interface AIMessageProps {
   /** 消息数据 */
   message: ClaudeStreamMessage;
+  /** 所有消息（用于工具结果查找） */
+  streamMessages?: ClaudeStreamMessage[];
   /** 是否正在流式输出 */
   isStreaming?: boolean;
   /** 自定义类名 */
@@ -58,6 +61,7 @@ const hasToolCalls = (message: ClaudeStreamMessage): boolean => {
  */
 export const AIMessage: React.FC<AIMessageProps> = ({
   message,
+  streamMessages = [],
   isStreaming = false,
   className
 }) => {
@@ -91,16 +95,10 @@ export const AIMessage: React.FC<AIMessageProps> = ({
 
         {/* 工具调用区域 */}
         {hasTools && (
-          <div className="border-t border-border bg-muted/30 px-4 py-3">
-            <div className="text-xs text-muted-foreground mb-2 flex items-center gap-2">
-              <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-              工具调用
-            </div>
-            {/* 这里将在 Phase 2 替换为 ToolCallsGroup 组件 */}
-            <div className="text-sm text-muted-foreground">
-              [工具调用详情将在 Phase 2 重构]
-            </div>
-          </div>
+          <ToolCallsGroup 
+            message={message} 
+            streamMessages={streamMessages}
+          />
         )}
       </MessageBubble>
     </div>

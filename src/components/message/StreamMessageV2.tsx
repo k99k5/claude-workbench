@@ -84,6 +84,7 @@ export const StreamMessageV2: React.FC<StreamMessageV2Props> = ({
     return (
       <AIMessage
         message={message}
+        streamMessages={streamMessages}
         isStreaming={isStreaming}
         onLinkDetected={onLinkDetected}
         className={className}
