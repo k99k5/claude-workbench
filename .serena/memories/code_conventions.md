@@ -1,1 +1,0 @@
-TS严格模式, PascalCase组件, camelCase文件, Tailwind原子类, React hooks+Context, Tauri invoke IPC
