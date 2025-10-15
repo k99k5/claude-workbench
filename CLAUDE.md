@@ -219,4 +219,4 @@ Core tables managed through `AgentDb` state wrapper:
 ### Translation Testing
 - Translation config persisted to file system
 - Cache cleared via `clear_translation_cache()` API method
-- Language detection available via `detect_text_language()`
+- Language detection available via `detect_text_language()` 
