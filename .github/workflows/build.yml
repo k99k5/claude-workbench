@@ -21,18 +21,6 @@ jobs:
       fail-fast: false
       matrix:
         platform:
-          - name: macOS-ARM
-            os: macos-latest
-            rust-target: aarch64-apple-darwin
-            tauri-args: --target aarch64-apple-darwin
-          - name: macOS-Intel
-            os: macos-latest
-            rust-target: x86_64-apple-darwin
-            tauri-args: --target x86_64-apple-darwin
-          - name: Linux
-            os: ubuntu-22.04
-            rust-target: x86_64-unknown-linux-gnu
-            tauri-args: ''
           - name: Windows
             os: windows-latest
             rust-target: x86_64-pc-windows-msvc
@@ -97,7 +85,6 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
 
       - name: Upload build artifacts
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@v4
         with:
           name: build-${{ matrix.platform.name }}
